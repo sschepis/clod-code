@@ -52,6 +52,18 @@ import { logger } from '../shared/logger';
 import { MAX_ATTACHMENT_TEXT_LENGTH } from '../shared/constants';
 import { resolveApiKey } from '../config/provider-registry';
 
+const PLAN_MODE_PREAMBLE =
+  `[PLAN MODE — DO NOT write code, edit files, or make any changes. ` +
+  `Instead, analyze the request by reading the relevant code and produce a detailed implementation plan. ` +
+  `Your plan should include: which files need to change, what each change should be, the order of operations, ` +
+  `and any edge cases or risks. Use search/grep, search/glob, and file/read tools to explore the codebase. ` +
+  `Do NOT use file/write, file/edit, shell/run, or any tool that modifies state. ` +
+  `Present the plan in a clear, numbered format that can be acted on directly.]\n\n`;
+
+function wrapPlanMode(text: string): string {
+  return PLAN_MODE_PREAMBLE + text;
+}
+
 function truncateForMemory(s: string): string {
   const trimmed = s.trim();
   if (!trimmed) return '';
@@ -833,7 +845,10 @@ export class Orchestrator {
             ? this.manager.getForeground()
             : this.manager.get(agentId)?.host;
         if (host) {
-          await host.submit(msg.text);
+          const inputText = msg.mode === 'plan'
+            ? wrapPlanMode(msg.text)
+            : msg.text;
+          await host.submit(inputText);
         } else {
           logger.warn(`Submit ignored — agent "${agentId}" not available`);
         }
