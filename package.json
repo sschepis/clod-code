@@ -1,0 +1,312 @@
+{
+  "name": "clodcode",
+  "displayName": "Clod Code",
+  "description": "Multi-LLM AI coding assistant for VS Code",
+  "version": "0.1.1",
+  "publisher": "sschepis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sschepis/clodcode.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "clodcode",
+          "title": "Clod Code",
+          "icon": "assets/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "clodcode": [
+        {
+          "type": "webview",
+          "id": "clodcode.chatPanel",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "clodcode.newSession",
+        "title": "Clod Code: New Session"
+      },
+      {
+        "command": "clodcode.clearSession",
+        "title": "Clod Code: Clear Session"
+      },
+      {
+        "command": "clodcode.switchModel",
+        "title": "Clod Code: Switch Model"
+      },
+      {
+        "command": "clodcode.askAboutSelection",
+        "title": "Ask Clod Code About Selection"
+      },
+      {
+        "command": "clodcode.focusChat",
+        "title": "Clod Code: Focus Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "clodcode.openSettings",
+        "title": "Clod Code: Open Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "clodcode.showLogs",
+        "title": "Clod Code: Show Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "clodcode.openSurface",
+        "title": "Clod Code: Open Surface"
+      },
+      {
+        "command": "clodcode.newChat",
+        "title": "Clod Code: New Chat Window"
+      },
+      {
+        "command": "clodcode.listChats",
+        "title": "Clod Code: List Chat Windows"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "clodcode.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "clodcode@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "clodcode.openSettings",
+          "when": "view == clodcode.chatPanel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clodcode.showLogs",
+          "when": "view == clodcode.chatPanel",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clodcode.clearSession",
+          "when": "view == clodcode.chatPanel",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "clodcode.focusChat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "clodcode.newChat",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n",
+        "when": "view == clodcode.chatPanel"
+      }
+    ],
+    "configuration": {
+      "title": "Clodcode",
+      "properties": {
+        "clodcode.localProvider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex-gemini",
+            "vertex-anthropic",
+            "openrouter",
+            "deepseek"
+          ],
+          "default": "ollama",
+          "description": "LLM provider for the local (triage) model"
+        },
+        "clodcode.localModel": {
+          "type": "string",
+          "default": "llama3:8b",
+          "description": "Model name for the local provider"
+        },
+        "clodcode.localBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL for the local provider"
+        },
+        "clodcode.localApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the local provider when it's a commercial LLM (prefer env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_API_KEY, etc.)"
+        },
+        "clodcode.remoteProvider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "openai",
+            "gemini",
+            "vertex-gemini",
+            "vertex-anthropic",
+            "openrouter",
+            "deepseek",
+            "ollama",
+            "lmstudio"
+          ],
+          "default": "anthropic",
+          "description": "LLM provider for the remote (powerful) model"
+        },
+        "clodcode.remoteModel": {
+          "type": "string",
+          "default": "claude-sonnet-4-20250514",
+          "description": "Model name for the remote provider"
+        },
+        "clodcode.remoteApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the remote provider (prefer env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
+        },
+        "clodcode.providerKeys": {
+          "type": "object",
+          "default": {},
+          "description": "API keys for multiple providers. Keys are provider names (e.g. 'anthropic', 'openai'), values are API key strings. Enables quick model switching from the chat header.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "clodcode.permissionMode": {
+          "type": "string",
+          "enum": [
+            "readonly",
+            "workspace-write",
+            "full-access",
+            "prompt"
+          ],
+          "default": "prompt",
+          "description": "Permission mode for tool execution"
+        },
+        "clodcode.maxIterations": {
+          "type": "number",
+          "default": 25,
+          "description": "Maximum tool-use iterations per turn"
+        },
+        "clodcode.maxContextTokens": {
+          "type": "number",
+          "default": 128000,
+          "description": "Maximum context window tokens"
+        },
+        "clodcode.triageEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable dual-LLM triage (local for simple queries, remote for complex tasks)"
+        },
+        "clodcode.autoCompact": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically compact sessions when token limit is approached"
+        },
+        "clodcode.autoCompactThreshold": {
+          "type": "number",
+          "default": 150000,
+          "description": "Token count threshold for auto-compaction"
+        },
+        "clodcode.instructionFile": {
+          "type": "string",
+          "default": "CLAUDE.md",
+          "description": "Name of the project instruction file"
+        },
+        "clodcode.maxConcurrentAgents": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum background agents that may run at once"
+        },
+        "clodcode.defaultAgentBudgetUsd": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0,
+          "description": "Default USD budget ceiling for spawned background agents"
+        },
+        "clodcode.agentTimeoutMs": {
+          "type": "number",
+          "default": 300000,
+          "minimum": 1000,
+          "description": "Default timeout (ms) for spawned background agents"
+        },
+        "clodcode.surfacesAutoOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the AI to open surface panels on its own after creating or updating them. When off, open surfaces manually via 'Clodcode: Open Surface'."
+        },
+        "clodcode.uiControlEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the AI to capture screenshots and drive the mouse/keyboard via nut.js. On macOS you must also grant VS Code Screen Recording and Accessibility permissions in System Settings."
+        },
+        "clodcode.peerDispatchEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow other Clodcode windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:ext && npm run build:webview",
+    "build:ext": "webpack --mode production",
+    "build:webview": "cd webview-ui && npm run build",
+    "dev": "concurrently \"webpack --mode development --watch\" \"cd webview-ui && npm run dev\"",
+    "watch": "webpack --mode development --watch",
+    "prepackage": "node scripts/prepackage.js",
+    "package": "npm run prepackage && vsce package --no-dependencies",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "postinstall": "node scripts/patch-oboto-agent.js"
+  },
+  "dependencies": {
+    "@aleph-ai/tinyaleph": "^1.7.3",
+    "@anthropic-ai/sdk": "^0.30.1",
+    "@google-cloud/vertexai": "^1.12.0",
+    "@google/generative-ai": "^0.21.0",
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "@sschepis/as-agent": "^0.1.2",
+    "@sschepis/llm-wrapper": "^0.1.7",
+    "@sschepis/lmscript": "^0.1.3",
+    "@sschepis/oboto-agent": "file:../oboto-agent",
+    "@sschepis/swiss-army-tool": "^0.1.2",
+    "@xenova/transformers": "^2.17.2",
+    "openai": "^4.104.0",
+    "web-tree-sitter": "^0.26.8",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "concurrently": "^8.2.0",
+    "copy-webpack-plugin": "^12.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0"
+  }
+}

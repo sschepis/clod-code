@@ -1,0 +1,67 @@
+.vscode/**
+.vscode-test/**
+src/**
+webview-ui/src/**
+webview-ui/node_modules/**
+webview-ui/package.json
+webview-ui/package-lock.json
+webview-ui/tsconfig.json
+webview-ui/vite.config.ts
+webview-ui/index.html
+webview-ui/settings.html
+webview-ui/postcss.config.js
+webview-ui/tailwind.config.js
+test/**
+**/*.map
+.gitignore
+webpack.config.js
+tsconfig.json
+in.code
+*.vsix
+package-lock.json
+
+# Include all of node_modules (runtime deps). dev-only dirs are
+# excluded below. This is safer than trying to whitelist every
+# transitive dependency — we'd miss one and crash at runtime.
+
+# Strip unnecessary content from node_modules
+node_modules/.bin/**
+node_modules/**/*.ts
+node_modules/**/*.ts.map
+node_modules/**/*.test.js
+node_modules/**/__tests__/**
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/example/**
+node_modules/**/examples/**
+node_modules/**/docs/**
+node_modules/**/doc/**
+node_modules/**/*.md
+node_modules/**/CHANGELOG*
+node_modules/**/LICENSE*
+node_modules/**/.github/**
+node_modules/**/.npmignore
+node_modules/**/.eslintrc*
+node_modules/**/.prettierrc*
+node_modules/**/*.flow
+node_modules/**/*.map
+
+# Dev-only dependencies that we should never ship
+node_modules/typescript/**
+node_modules/webpack/**
+node_modules/webpack-cli/**
+node_modules/ts-loader/**
+node_modules/copy-webpack-plugin/**
+node_modules/concurrently/**
+node_modules/vitest/**
+node_modules/@types/**
+node_modules/@vitejs/**
+node_modules/tsup/**
+node_modules/esbuild/**
+node_modules/@esbuild/**
+node_modules/rollup/**
+node_modules/@rollup/**
+node_modules/vite/**
+node_modules/tailwindcss/**
+node_modules/postcss*/**
+node_modules/autoprefixer/**

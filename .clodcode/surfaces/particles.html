@@ -1,0 +1,842 @@
+<html lang="en" >
+
+<head>
+  <meta charset="UTF-8">
+  
+
+    <link rel="apple-touch-icon" type="image/png" href="https://cpwebassets.codepen.io/assets/favicon/apple-touch-icon-5ae1a0698dcc2402e9712f7d01ed509a57814f994c660df9f7a952f3060705ee.png" />
+
+    <meta name="apple-mobile-web-app-title" content="CodePen">
+
+    <link rel="icon" type="image/x-icon" href="https://cpwebassets.codepen.io/assets/favicon/favicon-aec34940fbc1a6e787974dcd360f2c6b63348d4b1f4e06c77743096d55480f33.ico" />
+
+    <link rel="mask-icon" type="image/x-icon" href="https://cpwebassets.codepen.io/assets/favicon/logo-pin-b4b4269c16397ad2f0f7a01bcdf513a1994f4c94b8af2f191c09eb0d601762b1.svg" color="#111" />
+
+
+
+  
+  
+
+  <title>Untitled</title>
+
+    <link rel="canonical" href="https://codepen.io/sschepis/pen/WbxGjdb">
+  
+  <link rel="stylesheet" href="https://public.codepenassets.com/css/normalize-5.0.0.min.css">
+
+  
+  
+
+  <script>
+  window.console = window.console || function(t) {};
+</script>
+
+  
+  
+</head>
+
+<body translate="no">
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entropic Life XVI - Unified Physics</title>
+    <style>
+        :root { --accent: #a78bfa; --bg: #050505; --panel: rgba(15, 15, 20, 0.95); }
+        body, html { margin: 0; overflow: hidden; background: var(--bg); color: #ddd; font-family: 'Segoe UI', monospace; }
+        
+        /* FIX: Force canvas to fill screen regardless of internal resolution */
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: crosshair; }
+        
+        #ui-layer {
+            position: absolute; top: 0; right: 0; bottom: 0; width: 340px;
+            pointer-events: none;
+            display: flex; flex-direction: column; justify-content: flex-start;
+            padding: 10px;
+            z-index: 10;
+        }
+
+        #controls {
+            pointer-events: auto;
+            background: var(--panel);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 95vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            transition: transform 0.3s ease;
+        }
+        
+        #controls.collapsed { transform: translateX(360px); }
+
+        h1 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        
+        .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; color: #aaa; }
+        input[type=range] { width: 120px; accent-color: var(--accent); height: 2px; background: #333; cursor: pointer; }
+        input[type=checkbox] { accent-color: var(--accent); }
+        select { background: #222; color: #eee; border: 1px solid #444; padding: 4px; font-size: 11px; border-radius: 4px; width: 120px; }
+        .val-disp { font-family: monospace; color: var(--accent); width: 40px; text-align: right; }
+
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 15px; }
+        button.action {
+            background: #222; border: 1px solid #333; color: #ccc; padding: 8px;
+            font-size: 10px; border-radius: 3px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+        }
+        button.action:hover { background: #333; color: #fff; border-color: #666; }
+        button.highlight { border-color: var(--accent); color: var(--accent); }
+
+        #toggle-btn {
+            pointer-events: auto; position: absolute; top: 10px; right: 360px;
+            width: 32px; height: 32px; border-radius: 50%; background: var(--panel);
+            border: 1px solid #333; color: var(--accent); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: right 0.3s; z-index: 100;
+        }
+        #controls.collapsed + #toggle-btn { right: 10px; }
+        
+        h2 { margin: 15px 0 5px 0; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #333; padding-bottom: 2px; }
+        .help-text { font-size: 10px; color: #666; margin-top: 5px; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <canvas id="c"></canvas>
+    
+    <div id="ui-layer">
+        <div id="controls">
+            <h1>Entropic Life XVI</h1>
+            
+            <div style="font-size:10px; color:#666; margin-bottom:10px;">
+                Direct manipulation of physical laws.
+            </div>
+
+            <h2>Particle Physics</h2>
+            <div class="row"><span>Mass</span> <input type="range" id="g_mass" min="0.5" max="5.0" step="0.1"></div>
+            <div class="row"><span>Muscle</span> <input type="range" id="g_muscle" min="0" max="1.0" step="0.01"></div>
+            <div class="row"><span>Lag</span> <input type="range" id="g_lag" min="0" max="2.0" step="0.1"></div>
+            <div class="row"><span>Bond Dist</span> <input type="range" id="g_bond" min="20" max="150" step="5"></div>
+            <div class="row"><span>Stiffness</span> <input type="range" id="g_stiffness" min="0.01" max="0.5" step="0.01"></div>
+            <div class="row"><span>Repulsion</span> <input type="range" id="g_repulsion" min="0.1" max="2.0" step="0.1"></div>
+            <div class="row"><span>Alignment</span> <input type="range" id="g_align" min="0" max="0.5" step="0.01"></div>
+
+            <h2>Coherence Engine</h2>
+            <div class="row">
+                <span>Bonding Logic</span>
+                <select id="cohMode">
+                    <option value="proximity">Proximity</option>
+                    <option value="modular">Modular (Cyclic)</option>
+                    <option value="harmonic">Harmonic (Log)</option>
+                    <option value="bitwise">Digital (Bits)</option>
+                </select>
+            </div>
+            <div class="row">
+                <span>Modulus / Cycle</span>
+                <input type="range" id="modulus" min="2" max="432" step="1" value="432">
+                <span id="val_modulus" class="val-disp">432</span>
+            </div>
+            <div class="row">
+                <span>Coherence Force</span>
+                <input type="range" id="cohForce" min="0" max="1.0" step="0.01" value="0.8">
+                <span id="val_cohForce" class="val-disp">0.8</span>
+            </div>
+            <div class="row">
+                <span>Sync Rate</span>
+                <input type="range" id="syncRate" min="0" max="0.5" step="0.01" value="0.1">
+                <span id="val_syncRate" class="val-disp">0.1</span>
+            </div>
+
+            <h2>Environment</h2>
+            <div class="row">
+                <span>Viscosity</span>
+                <input type="range" id="viscosity" min="0.01" max="0.3" step="0.01" value="0.06">
+                <span id="val_viscosity" class="val-disp">0.06</span>
+            </div>
+            <div class="row">
+                <span>Gravity</span>
+                <input type="range" id="gravity" min="0" max="0.02" step="0.001" value="0.001">
+                <span id="val_gravity" class="val-disp">0.001</span>
+            </div>
+
+            <h2>Visuals</h2>
+            <div class="row">
+                <span>Trails (Fade)</span>
+                <input type="range" id="trailFade" min="0.05" max="1.0" step="0.05" value="0.3">
+            </div>
+            <div class="row">
+                <span>Glow</span>
+                <input type="checkbox" id="chk_glow" checked>
+            </div>
+
+            <h2>Interaction</h2>
+            <div class="row">
+                <span>Brush Size</span>
+                <input type="range" id="brushSize" min="10" max="300" value="50">
+            </div>
+            <div class="help-text">Left: Paint</div>
+
+            <div class="btn-grid">
+                <button class="action" id="btn-clear">Clear</button>
+                <button class="action" id="btn-reset">Reset</button>
+                <button class="action highlight" id="btn-rand">Randomize</button>
+                <button class="action" id="btn-pause">Pause</button>
+            </div>
+            
+            <div style="margin-top: 10px; font-size: 10px; color: #555; border-top: 1px solid #222; padding-top: 5px; display: flex; justify-content: space-between;">
+                <span>FPS: <span id="fps" style="color:#888">60</span></span>
+                <span>Entities: <span id="count" style="color:#888">0</span></span>
+            </div>
+        </div>
+        <div id="toggle-btn">≡</div>
+    </div>
+
+<script>
+/**
+ * ENTROPIC LIFE XVI - UNIFIED PHYSICS
+ * Upgrade: Heterogeneous Bonding (Flavors) & Steric Hindrance
+ */
+(() => {
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    // Internal resolution tracker
+    let W = 400;
+    let H = 400;
+
+    // --- 1. THE GENOME ---
+    const GENOME = { 
+        name: "Unified", 
+        mass: 1.5, 
+        muscle: 0.2, 
+        lag: 0.5, 
+        bondDist: 30, 
+        stiffness: 0.05, 
+        align: 0.05, 
+        repulsion: 0.6 
+    };
+
+    // --- 2. MATHEMATICAL SOULS ---
+    let primeNumbers = [];
+    let coherenceMatrix = [];
+    const MAX_PRIME_INDEX = 250; 
+
+    const isPrime = num => { for(let i=2, s=Math.sqrt(num); i<=s; i++) if(num%i===0) return false; return true; };
+    const generatePrimes = count => { 
+        primeNumbers = []; let num=2; 
+        while(primeNumbers.length < count) { if(isPrime(num)) primeNumbers.push(num); num++; } 
+    };
+
+    // --- STATE ---
+    const State = {
+        viscosity: 0.06, gravity: 0.001, brushSize: 50,
+        paused: false, drawLines: true, gridSize: 100,
+        modulus: 432, cohForce: 0.8, syncRate: 0.1, cohMode: 'proximity',
+        trailFade: 0.3, glow: true
+    };
+
+    const buildCoherenceMatrix = () => {
+        coherenceMatrix = Array(MAX_PRIME_INDEX).fill(0).map(() => new Float32Array(MAX_PRIME_INDEX));
+        for(let i=0; i<MAX_PRIME_INDEX; i++) {
+            for(let j=0; j<MAX_PRIME_INDEX; j++) {
+                if (i===j) coherenceMatrix[i][j] = 1.0;
+                else {
+                    const p = primeNumbers[i], q = primeNumbers[j];
+                    let val = 0;
+                    if (State.cohMode === 'modular') {
+                        let d = Math.abs((p % State.modulus) - (q % State.modulus));
+                        if (d > State.modulus/2) d = State.modulus - d;
+                        val = 1 - (d / (State.modulus/2));
+                    } else if (State.cohMode === 'harmonic') {
+                        const ratio = Math.abs(Math.log(p) - Math.log(q));
+                        val = Math.exp(-ratio * ratio * 5); 
+                    } else if (State.cohMode === 'bitwise') {
+                        val = (p & q) / (p | q);
+                    } else {
+                        val = 1 - (Math.abs(p-q)/(p+q));
+                    }
+                    val = Math.max(0, Math.min(1, val));
+                    coherenceMatrix[i][j] = Math.pow(val, 4); 
+                }
+            }
+        }
+    };
+
+    let particles = [];
+    let grid = new Map();
+    let mouse = { x: -1000, y: -1000, down: false };
+    let animationId = null;
+    let frameCount = 0, lastTime = 0;
+
+    // --- PARTICLE ---
+    class Particle {
+        constructor(x, y) {
+            this.x = x; this.y = y;
+            this.vx = 0; this.vy = 0;
+            // Accumulator buffers for synchronous integration
+            this.fx = 0; this.fy = 0;
+            
+            this.id = Math.random();
+            this.genome = GENOME;
+            
+            this.primeIndex = Math.floor(Math.random() * MAX_PRIME_INDEX);
+            this.primeValue = primeNumbers[this.primeIndex];
+            
+            // --- NEW: Emergent Flavors ---
+            // 0: Architect (Stiff structure)
+            // 1: Swarmer (Fluid alignment)
+            // 2: Sensor (Long range)
+            this.type = this.primeIndex % 4; // 0:Core, 1:Membrane, 2:Virus, 3:Food
+            if (this.type === 0) this.maxLinks = 4 + (this.primeValue % 3);
+            else if (this.type === 1) this.maxLinks = 2; // Strict bilayer
+            else if (this.type === 2) this.maxLinks = 1; // Parasitic
+            else this.maxLinks = 0; // Food
+            this.energy = 50 + Math.random() * 50; 
+
+            this.mass = Math.max(0.1, this.genome.mass);
+            const _speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+            this.energy += 0.2; // Ambient absorption
+            this.energy -= (_speed * 0.02); // Movement cost
+            this.energy -= (this.links * 0.2); // Bond cost
+            if (this.energy > 200) this.energy = 200;
+            if (this.energy <= 0) {
+                this.type = 3; this.maxLinks = 0; this.energy = 20; this.links = 0;
+                this.phase = Math.random() * Math.PI * 2; this.updateColor();
+            } 
+            this.phase = Math.random() * Math.PI * 2;
+            this.phaseRate = 0.01 + Math.random() * 0.01;
+            this.links = 0;
+            this.syncTime = 0; // Tracks how long this particle has been in resonance
+            this.updateColor();
+        }
+
+        updateColor() {
+            let hue = 0;
+            if (State.cohMode === 'modular') hue = ((this.primeValue % State.modulus) / State.modulus) * 360;
+            else if (State.cohMode === 'harmonic') hue = (Math.log(this.primeValue) * 50) % 360;
+            else if (State.cohMode === 'bitwise') hue = (this.primeValue % 256) * 1.4;
+            else hue = (this.primeIndex / MAX_PRIME_INDEX) * 360;
+            
+            // Modulate Saturation based on Type to visualize flavors
+            let sat = 85;
+            let light = 60;
+            
+            if (this.type === 0) { sat = 90; light = 50; } // Core: Rich
+            else if (this.type === 1) { sat = 50; light = 80; } // Membrane: Bright/Cyan
+            else if (this.type === 2) { hue = 0; sat = 100; light = 50; } // Virus: Red
+            else { sat = 10; light = 30; } // Food: Dim // Vivid (Sensors)
+            
+            this.color = `hsl(${hue}, ${sat}%, ${light}%)`;
+        }
+
+        integrate() {
+            this.mass = Math.max(0.1, this.genome.mass); 
+
+            // --- STEERING PHYSICS ---
+            // Decompose Force relative to existing direction
+            const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+            
+            if (speed > 0.001) {
+                // Normalized Heading
+                const hx = this.vx / speed;
+                const hy = this.vy / speed;
+                
+                // Project accumulated force onto heading
+                // Dot Product: Force parallel to heading (Thrust/Drag)
+                const fThrust = this.fx * hx + this.fy * hy;
+                
+                // Cross Product: Force perpendicular to heading (Steering/Torque)
+                const fSteer = this.fx * -hy + this.fy * hx;
+                
+                // 1. Apply Thrust to Speed
+                let newSpeed = speed + fThrust;
+                // Apply Viscosity Drag to Speed directly
+                newSpeed *= (1 - State.viscosity / this.mass);
+                // Prevent reversing from drag (unlikely but safe)
+                if (newSpeed < 0) newSpeed = 0;
+                
+                // 2. Apply Steering to Angle
+                // Heavier particles steer slower
+                const steerSensitivity = 0.5 / this.mass; 
+                const angleChange = fSteer * steerSensitivity;
+                
+                const currentAngle = Math.atan2(this.vy, this.vx);
+                const newAngle = currentAngle + angleChange;
+                
+                // Reconstruct Velocity vector
+                this.vx = Math.cos(newAngle) * newSpeed;
+                this.vy = Math.sin(newAngle) * newSpeed;
+            } else {
+                // If stationary, forces simply create new velocity vector
+                this.vx += this.fx;
+                this.vy += this.fy;
+            }
+
+            // Screen Bounds - Dynamic
+            const pad = 20;
+            const limitW = canvas.width;
+            const limitH = canvas.height;
+            
+            this.x += this.vx;
+            this.y += this.vy;
+            
+            if (this.x < pad) { this.x = pad; this.vx *= -0.8; }
+            if (this.x > limitW-pad) { this.x = limitW-pad; this.vx *= -0.8; }
+            if (this.y < pad) { this.y = pad; this.vy *= -0.8; }
+            if (this.y > limitH-pad) { this.y = limitH-pad; this.vy *= -0.8; }
+
+            this.phase += 0.1 * this.phaseRate; 
+            if (this.phase > Math.PI * 2) this.phase -= Math.PI * 2;
+        }
+    }
+
+    // --- PHYSICS ---
+    let lineBuffer = [];
+
+    const runPhysics = () => {
+        grid.clear();
+        lineBuffer = [];
+        const gridSize = State.gridSize;
+        
+        for (const p of particles) {
+            const k = (Math.floor(p.x / gridSize)) + ',' + (Math.floor(p.y / gridSize));
+            if (!grid.has(k)) grid.set(k, []);
+            grid.get(k).push(p);
+        }
+        
+        // Center for gravity
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        // 1. Accumulate Forces
+        for (const p of particles) {
+            p.links = 0; // Reset link count for this frame
+            p.fx = 0; p.fy = 0; // Reset accumulator
+            
+            // Add Gravity to Accumulator so it acts as a steering force too
+            if (State.gravity > 0) {
+                const dx = cx - p.x; 
+                const dy = cy - p.y;
+                const d = Math.sqrt(dx*dx + dy*dy);
+                if (d > 0) { 
+                    p.fx += (dx/d) * State.gravity * 20; // Boosted for steering calc
+                    p.fy += (dy/d) * State.gravity * 20; 
+                }
+            }
+
+            const gx = Math.floor(p.x / gridSize);
+            const gy = Math.floor(p.y / gridSize);
+            const g = p.genome; 
+
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const cell = grid.get((gx + i) + ',' + (gy + j));
+                    if (!cell) continue;
+
+                    for (const n of cell) {
+                        if (p === n) continue;
+
+                        const dx = n.x - p.x; const dy = n.y - p.y;
+                        const d2 = dx*dx + dy*dy;
+                        
+                        // --- DYNAMIC BONDING LOGIC ---
+                        const coherence = coherenceMatrix[p.primeIndex][n.primeIndex];
+                        const massFactor = (p.mass + n.mass) * 0.15;
+                        
+                        // --- FLAVOR PHYSICS ---
+                        // Define base bond properties dependent on pairing types
+                        let pairStiffness = g.stiffness;
+                        let pairAlign = g.align;
+                        let pairRangeMod = 1.0;
+                        
+                        // Flavor interactions
+                        if (p.type === 0 && n.type === 0) { // Architect + Architect
+                            pairStiffness *= 2.5; // Very stiff
+                            pairAlign *= 0.1;     // Rigid structure, not flocking
+                        } else if (p.type === 1 || n.type === 1) { // Swarmer involved
+                            pairStiffness *= 0.6; // Loose bonds
+                            pairAlign *= 3.0;     // High alignment (flocking)
+                        } else if (p.type === 2 || n.type === 2) { // Sensor involved
+                            pairRangeMod = 1.5;   // Extended reach
+                            pairStiffness *= 0.3; // Weak pull
+                        }
+
+                        const rangeScale = (1.0 + massFactor + (coherence * 0.5)) * pairRangeMod; 
+                        const maxDist = g.bondDist * rangeScale;
+                        
+                        if (d2 > maxDist * maxDist || d2 === 0) continue;
+
+                        const dist = Math.sqrt(d2);
+                        const nx = dx / dist; const ny = dy / dist;
+
+                        // Skin/Repulsion includes mass
+                        const skin = (p.mass + n.mass) * 6 + 10;
+                        
+                        if (dist < skin) {
+                            // Close range: Always Repel
+                            const repelForce = (1 - dist/skin) * g.repulsion * 0.4;
+                            p.fx -= nx * repelForce; p.fy -= ny * repelForce;
+                        } 
+                        else 
+                        {
+                            // Bond Range
+                            if (coherence > 0.1) {
+                                // --- VALENCY CHECK (Steric Hindrance) ---
+                                // If "crowded", attraction turns off (or becomes repulsion)
+                                // This prevents infinite overlapping blobs
+                                const crowded = (p.links >= p.maxLinks) || (n.links >= n.maxLinks);
+                                
+                                if (crowded) {
+                                     // Mild repulsive pressure to maintain spacing in crowd
+                                     const crowdPush = (1 - dist/maxDist) * g.repulsion * 0.05;
+                                     p.fx -= nx * crowdPush; p.fy -= ny * crowdPush;
+                                } else {
+                                    // Valid Bond Possible
+                                    const phaseDiff = Math.abs(p.phase - n.phase);
+                                    const phaseFactor = (Math.cos(phaseDiff) + 1) / 2; 
+                                    const saturation = 1.0 / (1.0 + p.links * 0.2);
+
+                                    const activity = Math.sin(p.phase) * g.muscle;
+                                    const target = maxDist * (0.4 + activity * 0.2);
+                                    
+                                    const dynamicStr = pairStiffness * (coherence * State.cohForce + 0.2) * (0.5 + phaseFactor) * saturation;
+                                    const force = (dist - target) * dynamicStr;
+                                    
+                                    p.fx += nx * force / p.mass; p.fy += ny * force / p.mass;
+                                    
+                                    // --- KURAMOTO PHASE ENTRAINMENT & VIRAL PREDATION ---
+                                    let phaseTorque = Math.sin(n.phase - p.phase) * State.syncRate * coherence;
+                                    
+                                    if (p.type === 2 && n.type !== 2) {
+                                        phaseTorque = -Math.abs(phaseTorque) * 5; // Destructive interference
+                                        p.energy += 2; n.energy -= 2; // Steal energy
+                                    } else if (n.type === 2 && p.type !== 2) {
+                                        phaseTorque = Math.abs(phaseTorque) * 5;
+                                        n.energy += 2; p.energy -= 2;
+                                    }
+
+                                    p.phase += phaseTorque / p.mass;
+                                    n.phase -= phaseTorque / n.mass;
+
+                                    // --- METABOLIC TRANSMUTATION (Reproduction) ---
+                                    if (Math.abs(phaseTorque) < 0.05 && coherence > 0.5 && p.type !== 2 && n.type !== 2) {
+                                        p.syncTime++;
+                                        if (p.syncTime > 40) {
+                                            if (p.links > n.links && p.energy > 120) {
+                                                n.primeIndex = p.primeIndex;
+                                                n.primeValue = p.primeValue;
+                                                n.type = p.type;
+                                                n.maxLinks = p.maxLinks;
+                                                n.genome = { ...p.genome, mass: p.genome.mass * (0.95 + Math.random()*0.1) };
+                                                n.updateColor();
+                                                n.syncTime = 0;
+                                                p.energy -= 60; // Cost of reproduction
+                                                n.energy = 60;
+                                            }
+                                        }
+                                    } else {
+                                        p.syncTime = 0;
+                                    }
+                                    
+                                    if (Math.abs(force) > 0.01) {
+                                        p.links++; // Increment bond count
+                                        // n.links would be incremented when the loop hits n
+                                        
+                                        if (State.drawLines && p.id < n.id) {
+                                            const str = Math.min(1, Math.abs(force)*10) * coherence;
+                                            lineBuffer.push({ x1: p.x, y1: p.y, x2: n.x, y2: n.y, str: str, coh: coherence });
+                                        }
+                                    }
+                                    
+                                    // Apply Flavor-modified Alignment
+                                    if (pairAlign > 0 && dist < maxDist * 0.8) {
+                                        p.fx += (n.vx - p.vx) * pairAlign * coherence * saturation;
+                                        p.fy += (n.vy - p.vy) * pairAlign * coherence * saturation;
+                                    }
+                                    
+                                    const dot = (p.vx * nx + p.vy * ny);
+                                    const lagDir = dot > 0 ? -g.lag : g.lag;
+                                    let targetPhase = n.phase + lagDir;
+                                    let pDiff = targetPhase - p.phase;
+                                    if (pDiff > Math.PI) pDiff -= Math.PI*2;
+                                    if (pDiff < -Math.PI) pDiff += Math.PI*2;
+                                    p.phase += pDiff * State.syncRate * coherence;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    // --- RENDER ---
+    const draw = () => {
+        ctx.fillStyle = `rgba(5, 5, 8, ${State.trailFade})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Brush
+        if (mouse.down && mouse.x > -100) {
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(mouse.x, mouse.y, State.brushSize, 0, Math.PI*2);
+            ctx.stroke();
+        }
+
+        // Links
+        if (State.drawLines) {
+            ctx.lineWidth = 1;
+            for (const l of lineBuffer) {
+                const lightness = 50 + l.coh * 50;
+                ctx.strokeStyle = `hsla(180, 100%, ${lightness}%, ${l.str * 0.3})`;
+                ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+            }
+        }
+
+        // Particles
+        for (const p of particles) {
+            ctx.fillStyle = p.color;
+            let size = Math.max(0.5, p.mass * 1.5); 
+            size += Math.sin(p.phase) * 0.5;
+
+            if (State.glow && p.links > 2) {
+                ctx.shadowBlur = 10 + p.links;
+                ctx.shadowColor = p.color;
+            } else {
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.beginPath(); ctx.arc(p.x, p.y, size, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    };
+
+    // Robust dimension checking
+    const checkResize = () => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        // If window has valid size but canvas doesn't match, update immediately
+        // This handles iframes snapping to size after init
+        if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+            canvas.width = w;
+            canvas.height = h;
+            W = w; H = h;
+            // If the canvas suddenly grew significantly (e.g. from 400 to 1920), 
+            // the particles are likely stuck in the corner. Reset them.
+            if (w > 800 && particles.length > 0) {
+                // Check clustering
+                let clumped = true;
+                for(let p of particles) {
+                    if (p.x > 500 || p.y > 500) { clumped = false; break; }
+                }
+                if (clumped) sim.reset();
+        // Inject Seeds (Cores, Membranes, Viruses)
+        for(let i=0; i<30; i++) {
+            let seed = particles[i];
+            if (i < 10) { // Cores
+                seed.primeIndex = 1; seed.primeValue = primeNumbers[1]; seed.type = 0; seed.maxLinks = 5;
+                seed.genome.mass = 3.0; seed.genome.stiffness = 0.4; seed.genome.bondDist = 80;
+            } else if (i < 25) { // Membranes
+                seed.primeIndex = 2; seed.primeValue = primeNumbers[2]; seed.type = 1; seed.maxLinks = 2;
+                seed.genome.mass = 1.0; seed.genome.stiffness = 0.8; seed.genome.bondDist = 40;
+            } else { // Viruses
+                seed.primeIndex = 3; seed.primeValue = primeNumbers[3]; seed.type = 2; seed.maxLinks = 1;
+                seed.genome.mass = 0.5; seed.genome.stiffness = 0.1; seed.genome.bondDist = 100;
+            }
+            seed.energy = 200;
+            seed.updateColor();
+        }
+            }
+        }
+    };
+
+    const loop = (now) => {
+        // Run resize check inside loop to catch iframe updates
+        checkResize();
+
+        if (!State.paused) {
+            if (mouse.down && mouse.x > -100) {
+                if (Math.random() > 0.5) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.random() * State.brushSize;
+                    particles.push(new Particle(mouse.x + Math.cos(angle)*r, mouse.y + Math.sin(angle)*r));
+                }
+            }
+            runPhysics();
+            for(const p of particles) p.integrate();
+        }
+        
+        draw();
+        
+        if (now - lastTime >= 500) {
+            document.getElementById('fps').innerText = Math.round(1000 / (now - lastTime) * frameCount);
+            document.getElementById('count').innerText = particles.length;
+            frameCount = 0; lastTime = now;
+        }
+        frameCount++;
+        animationId = requestAnimationFrame(loop);
+    };
+
+    const sim = {
+        clear: () => particles = [],
+        reset: () => {
+            particles = [];
+            // Use window dimensions directly for spawning, ignoring canvas state
+            // to prevent "400px box" clustering
+            const spawnW = window.innerWidth || 800;
+            const spawnH = window.innerHeight || 800;
+            const pad = 50;
+            
+            for(let i=0; i<400; i++) {
+                particles.push(new Particle(
+                    pad + Math.random() * (spawnW - pad * 2), 
+                    pad + Math.random() * (spawnH - pad * 2)
+                ));
+            }
+        },
+        randomize: () => {
+            GENOME.mass = 0.5 + Math.random() * 4.0;
+            GENOME.muscle = Math.random();
+            GENOME.lag = Math.random() * 1.5;
+            GENOME.align = Math.random() * 0.25;
+            GENOME.bondDist = 20 + Math.random() * 100;
+            GENOME.stiffness = 0.01 + Math.random() * 0.2;
+            GENOME.repulsion = 0.2 + Math.random() * 1.5;
+            
+            State.viscosity = 0.01 + Math.random() * 0.1;
+            State.modulus = 100 + Math.floor(Math.random() * 332);
+            
+            updateUI();
+            
+            particles.forEach(p => {
+                p.primeIndex = Math.floor(Math.random() * MAX_PRIME_INDEX);
+                p.primeValue = primeNumbers[p.primeIndex];
+                p.type = p.primeIndex % 3; // Update types on reroll
+                p.maxLinks = (p.primeValue % 4) + 2; 
+                p.updateColor();
+            });
+        },
+        togglePause: () => {
+            State.paused = !State.paused;
+            document.getElementById('btn-pause').innerText = State.paused ? "Resume" : "Pause";
+        }
+    };
+
+    const updateUI = () => {
+        document.getElementById('g_mass').value = GENOME.mass;
+        document.getElementById('g_muscle').value = GENOME.muscle;
+        document.getElementById('g_lag').value = GENOME.lag;
+        document.getElementById('g_align').value = GENOME.align;
+        document.getElementById('g_bond').value = GENOME.bondDist;
+        document.getElementById('g_stiffness').value = GENOME.stiffness;
+        document.getElementById('g_repulsion').value = GENOME.repulsion;
+
+        document.getElementById('viscosity').value = State.viscosity;
+        document.getElementById('val_viscosity').innerText = State.viscosity.toFixed(3);
+        document.getElementById('modulus').value = State.modulus;
+        document.getElementById('val_modulus').innerText = State.modulus;
+    };
+
+    const init = () => {
+        generatePrimes(MAX_PRIME_INDEX);
+        buildCoherenceMatrix();
+
+        const bindSlider = (id, prop) => {
+            const el = document.getElementById(id);
+            if(el) {
+                el.value = GENOME[prop];
+                el.oninput = e => GENOME[prop] = parseFloat(e.target.value);
+            }
+        };
+        bindSlider('g_mass', 'mass');
+        bindSlider('g_muscle', 'muscle');
+        bindSlider('g_lag', 'lag');
+        bindSlider('g_align', 'align');
+        bindSlider('g_bond', 'bondDist');
+        bindSlider('g_stiffness', 'stiffness');
+        bindSlider('g_repulsion', 'repulsion');
+
+        document.getElementById('brushSize').oninput = e => State.brushSize = +e.target.value;
+        document.getElementById('trailFade').oninput = e => State.trailFade = +e.target.value;
+        document.getElementById('chk_glow').onchange = e => State.glow = e.target.checked;
+        document.getElementById('viscosity').oninput = e => { State.viscosity = +e.target.value; document.getElementById('val_viscosity').innerText = State.viscosity.toFixed(3); };
+        document.getElementById('gravity').oninput = e => { State.gravity = +e.target.value; document.getElementById('val_gravity').innerText = State.gravity.toFixed(3); };
+        
+        document.getElementById('cohMode').onchange = e => {
+            State.cohMode = e.target.value;
+            buildCoherenceMatrix();
+            particles.forEach(p => p.updateColor());
+        };
+        document.getElementById('modulus').oninput = e => { 
+            State.modulus = +e.target.value; 
+            document.getElementById('val_modulus').innerText = State.modulus;
+            if(State.cohMode === 'modular') buildCoherenceMatrix();
+            particles.forEach(p => p.updateColor());
+        };
+        document.getElementById('cohForce').oninput = e => { 
+            State.cohForce = +e.target.value; 
+            document.getElementById('val_cohForce').innerText = State.cohForce;
+        };
+        document.getElementById('syncRate').oninput = e => { 
+            State.syncRate = +e.target.value; 
+            document.getElementById('val_syncRate').innerText = State.syncRate;
+        };
+
+        document.getElementById('btn-clear').onclick = sim.clear;
+        document.getElementById('btn-reset').onclick = sim.reset;
+        document.getElementById('btn-rand').onclick = sim.randomize;
+        document.getElementById('btn-pause').onclick = sim.togglePause;
+        document.getElementById('toggle-btn').onclick = () => document.getElementById('controls').classList.toggle('collapsed');
+
+        canvas.addEventListener('mousedown', e => {
+            mouse.down = true;
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+        canvas.addEventListener('mouseup', () => { mouse.down = false; mouse.x = -1000; });
+        canvas.addEventListener('contextmenu', e => e.preventDefault()); 
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            mouse.down = true;
+            const t = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = t.clientX - rect.left;
+            mouse.y = t.clientY - rect.top;
+        }, {passive:false});
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            const t = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = t.clientX - rect.left;
+            mouse.y = t.clientY - rect.top;
+        }, {passive:false});
+        canvas.addEventListener('touchend', () => { mouse.down = false; mouse.x = -1000; });
+
+        window.addEventListener('resize', checkResize);
+
+        // Initial setup
+        checkResize();
+        sim.reset();
+        
+        if (animationId) cancelAnimationFrame(animationId);
+        requestAnimationFrame(loop);
+    };
+
+    setTimeout(init, 50);
+})();
+</script>
+</body>
+</html>
+  
+  
+  
+</body>
+
+</html>
