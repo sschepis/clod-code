@@ -207,4 +207,41 @@ export function registerCommands(
       }
     })
   );
+
+  // ── Context Menu Helpers ─────────────────────────────────────────
+
+  const askWithSelection = async (promptPrefix: string) => {
+    if (!orchestrator) return;
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    const selection = editor.selection;
+    if (selection.isEmpty) return;
+
+    const text = editor.document.getText(selection);
+    const fileName = editor.document.fileName.split(/[\\/]/).pop();
+    const prompt = `${promptPrefix}\n\n\`\`\`${editor.document.languageId}\n// ${fileName}\n${text}\n\`\`\``;
+
+    // Try to find the active webview panel first, fallback to sidebar
+    const targetId = chatPanelManager?.getActivePanelId();
+    if (targetId) {
+      chatPanelManager?.focusPanel(targetId);
+      await orchestrator.submitToAgent(targetId, prompt);
+    } else {
+      await vscode.commands.executeCommand('clodcode.chatPanel.focus');
+      await orchestrator.submitToAgent('foreground', prompt);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLAIN_CODE, () => askWithSelection('Please explain the following code:'))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.REFACTOR_CODE, () => askWithSelection('Please refactor the following code to improve readability and performance:'))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.WRITE_TESTS, () => askWithSelection('Please write unit tests for the following code:'))
+  );
 }

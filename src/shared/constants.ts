@@ -12,6 +12,9 @@ export const COMMANDS = {
   OPEN_SURFACE: 'clodcode.openSurface',
   NEW_CHAT: 'clodcode.newChat',
   LIST_CHATS: 'clodcode.listChats',
+  EXPLAIN_CODE: 'clodcode.explainCode',
+  REFACTOR_CODE: 'clodcode.refactorCode',
+  WRITE_TESTS: 'clodcode.writeTests',
 } as const;
 
 export const ENV_KEY_MAP: Record<string, string> = {

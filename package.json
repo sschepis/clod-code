@@ -83,12 +83,39 @@
       {
         "command": "clodcode.listChats",
         "title": "Clod Code: List Chat Windows"
+      },
+      {
+        "command": "clodcode.explainCode",
+        "title": "Clod Code: Explain Code"
+      },
+      {
+        "command": "clodcode.refactorCode",
+        "title": "Clod Code: Refactor Code"
+      },
+      {
+        "command": "clodcode.writeTests",
+        "title": "Clod Code: Write Tests"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "clodcode.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "clodcode@1"
+        },
+        {
+          "command": "clodcode.explainCode",
+          "when": "editorHasSelection",
+          "group": "clodcode@1"
+        },
+        {
+          "command": "clodcode.refactorCode",
+          "when": "editorHasSelection",
+          "group": "clodcode@1"
+        },
+        {
+          "command": "clodcode.writeTests",
           "when": "editorHasSelection",
           "group": "clodcode@1"
         }
@@ -275,7 +302,40 @@
           "description": "Allow other Clodcode windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "clodcode.welcome",
+        "title": "Welcome to Clod Code",
+        "description": "Get started with your multi-LLM AI coding assistant.",
+        "steps": [
+          {
+            "id": "clodcode.step1",
+            "title": "Start a Chat",
+            "description": "Open the Clod Code chat panel from the Activity Bar to start talking to your assistant. \n[Open Chat](command:clodcode.focusChat)",
+            "media": {
+              "markdown": "assets/walkthrough-chat.md"
+            }
+          },
+          {
+            "id": "clodcode.step2",
+            "title": "Configure Your Models",
+            "description": "Clod Code supports OpenAI, Anthropic, Gemini, and local models. Set your API keys and default provider in the settings.\n[Open Settings](command:clodcode.openSettings)",
+            "media": {
+              "markdown": "assets/walkthrough-models.md"
+            }
+          },
+          {
+            "id": "clodcode.step3",
+            "title": "Surfaces & Routes",
+            "description": "Clod Code can generate interactive Web UIs (Surfaces) and local API endpoints (Routes) directly inside your workspace.",
+            "media": {
+              "markdown": "assets/walkthrough-surfaces.md"
+            }
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "npm run build:ext && npm run build:webview",
@@ -315,5 +375,18 @@
     "vitest": "^2.0.0",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.0"
-  }
+  },
+  "icon": "assets/icon.png",
+  "keywords": [
+    "ai",
+    "copilot",
+    "llm",
+    "chat",
+    "agents",
+    "coding assistant"
+  ],
+  "bugs": {
+    "url": "https://github.com/sschepis/clodcode/issues"
+  },
+  "homepage": "https://github.com/sschepis/clodcode#readme"
 }
