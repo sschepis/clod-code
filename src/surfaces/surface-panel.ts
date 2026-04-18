@@ -31,6 +31,10 @@ export interface SurfacePanelOptions {
   onDispose: () => void;
   /** Called when the surface JS throws an unhandled error. */
   onError?: (error: SurfaceError) => void;
+  /** Called when the surface requests to submit text to an agent. */
+  onSubmitToAgent?: (text: string, agentId?: string) => void;
+  /** Called when the surface requests to execute a tool. */
+  onExecuteTool?: (tool: string, kwargs: Record<string, unknown>) => Promise<any>;
 }
 
 /**
@@ -68,9 +72,12 @@ export class SurfacePanel {
       opts.onDispose();
     });
 
-    this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+    
+    this.panel.webview.onDidReceiveMessage(async (msg: unknown) => {
       if (!msg || typeof msg !== 'object') return;
       const m = msg as Record<string, unknown>;
+      
+      // Surface Error Reporting
       if (m.type === 'clodcode:surface-error' && opts.onError) {
         opts.onError({
           name: this.opts.name,
@@ -80,6 +87,29 @@ export class SurfacePanel {
           lineno: typeof m.lineno === 'number' ? m.lineno : undefined,
           colno: typeof m.colno === 'number' ? m.colno : undefined,
         });
+      }
+      
+      // API: Submit to Agent
+      if (m.type === 'clodcode:submit-to-agent' && opts.onSubmitToAgent) {
+        opts.onSubmitToAgent(String(m.text || ''), m.agentId as string | undefined);
+      }
+      
+      // API: Execute Tool
+      if (m.type === 'clodcode:execute-tool' && opts.onExecuteTool) {
+        try {
+          const result = await opts.onExecuteTool(String(m.tool), m.kwargs as Record<string, unknown>);
+          this.panel.webview.postMessage({ 
+            type: 'clodcode:tool-result', 
+            id: m.id, 
+            result 
+          });
+        } catch (err: any) {
+          this.panel.webview.postMessage({ 
+            type: 'clodcode:tool-error', 
+            id: m.id, 
+            error: err.message 
+          });
+        }
       }
     });
 

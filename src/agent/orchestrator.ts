@@ -124,6 +124,22 @@ export class Orchestrator {
       isAutoOpenEnabled: () => this.settings.surfacesAutoOpen,
       getRoutesUrl: () => this.routeManager.baseUrl(),
       onSurfaceError: (error) => this.handleSurfaceAutoFix(error),
+      onSubmitToAgent: (text, agentId) => {
+        const target = agentId || 'foreground';
+        this.submitToAgent(target, text);
+        // Reveal the chat panel if submitting to foreground
+        if (target === 'foreground') {
+          vscode.commands.executeCommand('clodcode.chatPanel.focus');
+        }
+      },
+      onExecuteTool: async (tool, kwargs) => {
+        // Route tool execution through the foreground agent's tool tree
+        const agent = this.manager.getForeground();
+        if (!agent) throw new Error('No foreground agent available to execute tools');
+        const toolObj = agent.tools.getTool(tool);
+        if (!toolObj) throw new Error(`Tool not found: ${tool}`);
+        return await toolObj.handler(kwargs);
+      },
     });
     this.skillManager = new SkillManager();
     this.dispatches = new DispatchRegistry();
@@ -771,8 +787,8 @@ export class Orchestrator {
     switch (msg.type) {
       case 'ready': {
         if (msg.panelAgentId) {
-          // Panel-specific sync: only send that agent's slice
-          this.bridge.sendSync(msg.panelAgentId);
+          // Panel-specific sync: send that agent's slice with focus pinned to itself
+          this.bridge.sendSync(msg.panelAgentId, msg.panelAgentId);
           break;
         }
         // Sidebar sync: send focused slice + full state

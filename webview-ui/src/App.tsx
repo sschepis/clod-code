@@ -61,7 +61,11 @@ export default function App() {
       case 'sync':
         sync(aid, msg.events, msg.phase, msg.cost, msg.activeModel, msg.mode);
         if (msg.agents) {
-          syncAgents(msg.agents, msg.focusedAgentId ?? FOREGROUND_AGENT_ID);
+          // In panel mode, always keep focus pinned to this panel's agent
+          const resolvedFocus = isPanelMode
+            ? PANEL_AGENT_ID!
+            : (msg.focusedAgentId ?? FOREGROUND_AGENT_ID);
+          syncAgents(msg.agents, resolvedFocus);
         }
         break;
       case 'event':
@@ -174,7 +178,7 @@ export default function App() {
         removeAgent(msg.agentId);
         break;
       case 'agents_sync':
-        syncAgents(msg.agents, msg.focusedAgentId);
+        syncAgents(msg.agents, isPanelMode ? PANEL_AGENT_ID! : msg.focusedAgentId);
         break;
       case 'peers_update':
         setPeers(msg.peers);

@@ -33,6 +33,10 @@ export interface SurfaceManagerOptions {
   getRoutesUrl: () => string | null;
   /** Called when a surface webview reports a JS runtime error. */
   onSurfaceError?: (error: SurfaceError) => void;
+  /** Called when a surface requests to submit text to an agent. */
+  onSubmitToAgent?: (text: string, agentId?: string) => void;
+  /** Called when a surface requests to execute a tool. */
+  onExecuteTool?: (tool: string, kwargs: Record<string, unknown>) => Promise<any>;
 }
 
 export class SurfaceManager {

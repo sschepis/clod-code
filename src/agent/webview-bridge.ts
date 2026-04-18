@@ -171,7 +171,7 @@ export class WebviewBridge {
    * connects or when focus switches to an agent the webview hasn't
    * seen yet.
    */
-  sendSync(agentId: string): void {
+  sendSync(agentId: string, focusOverride?: string): void {
     const slice = this.slices.get(agentId);
     if (!slice) return;
 
@@ -190,7 +190,7 @@ export class WebviewBridge {
       activeModel: slice.activeModel,
       mode: slice.mode,
       agents: this.listAgentSummaries(),
-      focusedAgentId: this.focusedAgentId,
+      focusedAgentId: focusOverride ?? this.focusedAgentId,
     });
   }
 
