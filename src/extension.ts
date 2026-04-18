@@ -8,6 +8,7 @@ if (!isMainThread && workerData?.type === 'route-worker') {
 import * as vscode from 'vscode';
 import { SidebarProvider } from './vscode-integration/sidebar-provider';
 import { StatusBar } from './vscode-integration/status-bar';
+import { ExplorerProvider } from './vscode-integration/explorer-provider';
 import { registerCommands } from './vscode-integration/commands';
 import { ChatPanelManager } from './vscode-integration/chat-panel-manager';
 import { ChatPanel } from './vscode-integration/chat-panel';
@@ -105,6 +106,12 @@ export async function activate(context: vscode.ExtensionContext) {
       // Create ChatPanelManager for multi-chat support
       chatPanelManager = new ChatPanelManager(context.extensionUri, orchestrator, sessionStore);
 
+      // Wire panel rename callback so agents can set their own chat title
+      const cpm = chatPanelManager;
+      orchestrator.setPanelRenamer((panelId, title) => {
+        cpm.renamePanel(panelId, title);
+      });
+
       // Register panel serializer for VS Code to revive panels across reloads
       context.subscriptions.push(
         vscode.window.registerWebviewPanelSerializer(ChatPanel.viewType, {
@@ -133,6 +140,23 @@ export async function activate(context: vscode.ExtensionContext) {
     } catch (err) {
       logger.error('Failed to create orchestrator', err);
     }
+  }
+
+
+  // Register Clodcode Explorer
+  try {
+    const explorerProvider = new ExplorerProvider();
+    context.subscriptions.push(
+      vscode.window.registerTreeDataProvider('clodcode.explorer', explorerProvider),
+      explorerProvider
+    );
+    // Optional: Register a command to refresh the explorer
+    context.subscriptions.push(
+      vscode.commands.registerCommand('clodcode.refreshExplorer', () => explorerProvider.refresh())
+    );
+    logger.info('Explorer Provider registered');
+  } catch (err) {
+    logger.error('Failed to register Explorer Provider', err);
   }
 
   // 8. Register commands — ALWAYS run this, even if orchestrator is missing

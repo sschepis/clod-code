@@ -34,6 +34,10 @@
     "views": {
       "clodcode": [
         {
+          "id": "clodcode.explorer",
+          "name": "Explorer"
+        },
+        {
           "type": "webview",
           "id": "clodcode.chatPanel",
           "name": "Chat"
@@ -95,6 +99,11 @@
       {
         "command": "clodcode.writeTests",
         "title": "Clod Code: Write Tests"
+      },
+      {
+        "command": "clodcode.refreshExplorer",
+        "title": "Refresh Explorer",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -135,6 +144,11 @@
           "command": "clodcode.clearSession",
           "when": "view == clodcode.chatPanel",
           "group": "navigation@3"
+        },
+        {
+          "command": "clodcode.refreshExplorer",
+          "when": "view == clodcode.explorer",
+          "group": "navigation"
         }
       ]
     },
