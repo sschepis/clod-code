@@ -106,6 +106,17 @@ export class ChatPanelManager {
     }));
   }
 
+  getActivePanelId(): string | undefined {
+    for (const [id, panel] of this.panels) {
+      if (panel.isActive) return id;
+    }
+    return undefined;
+  }
+
+  focusPanel(panelId: string): void {
+    this.panels.get(panelId)?.reveal();
+  }
+
   disposeAll(): void {
     for (const [id, panel] of this.panels) {
       this.orchestrator.getBridge().unregisterTarget(id);

@@ -1,4 +1,4 @@
-import { encode, initEncoder } from '../memory/encoding';
+import { initEncoder, encodeEntry } from '../memory/encoding';
 import type { AgentSyncMetrics } from '../../shared/message-types';
 import { logger } from '../../shared/logger';
 
@@ -101,19 +101,22 @@ export class AgentSyncMonitor {
     if (had) this.computeAndBroadcast();
   }
 
-  ingestContent(agentId: string, text: string): void {
+  async ingestContent(agentId: string, text: string): Promise<void> {
     if (this.disposed) return;
     const model = this.models.get(agentId);
     if (!model) return;
 
     try {
-      const state = encode(text);
-      const activePrimes = state.getActivePrimes();
-      if (activePrimes.length === 0) return;
+      const embedding = await encodeEntry(text);
+      if (embedding.length === 0) return;
 
-      // Map encoded primes (from 4096-prime space) into oscillator indices
-      // via modulo. This ensures any prime lands on a valid oscillator.
-      const indices = new Set(activePrimes.map(p => p % NUM_OSCILLATORS));
+      // Map embedding dimensions into oscillator indices. Pick the top-N
+      // dimensions by absolute value and use their indices modulo oscillator
+      // count. This gives a sparse excitation pattern from the dense vector.
+      const indexed = embedding.map((v, i) => ({ i, v: Math.abs(v) }));
+      indexed.sort((a, b) => b.v - a.v);
+      const topK = Math.min(32, indexed.length);
+      const indices = new Set(indexed.slice(0, topK).map(x => x.i % NUM_OSCILLATORS));
       model.exciteByIndices([...indices], EXCITATION_AMOUNT);
       model.step(STEP_DT);
       this.scheduleSyncBroadcast();

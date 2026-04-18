@@ -1,10 +1,11 @@
-import { pipeline } from '@xenova/transformers';
-
 let extractor: any = null;
+
+const dynamicImport: <T = any>(specifier: string) => Promise<T> =
+  new Function('specifier', 'return import(specifier)') as any;
 
 export async function initEncoder(): Promise<void> {
   if (extractor) return;
-  // Initialize the feature extraction pipeline.
+  const { pipeline } = await dynamicImport<typeof import('@xenova/transformers')>('@xenova/transformers');
   extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
     quantized: true,
   });

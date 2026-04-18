@@ -457,6 +457,24 @@ export class Orchestrator {
     return this.manager.getForeground()?.getSession();
   }
 
+  async submitToAgent(agentId: string, text: string): Promise<void> {
+    this.bridge.appendEvent(agentId, {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: now(),
+    });
+    const host =
+      agentId === FOREGROUND_AGENT_ID
+        ? this.manager.getForeground()
+        : this.manager.get(agentId)?.host;
+    if (host) {
+      await host.submit(text);
+    } else {
+      logger.warn(`submitToAgent ignored — agent "${agentId}" not available`);
+    }
+  }
+
   dispose(): void {
     void this.peerManager.stop();
     void this.routeManager.stop();

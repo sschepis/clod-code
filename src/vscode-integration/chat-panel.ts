@@ -66,6 +66,10 @@ export class ChatPanel implements WebviewTarget {
     return this.panel.visible;
   }
 
+  get isActive(): boolean {
+    return this.panel.active;
+  }
+
   reveal(): void {
     this.panel.reveal();
   }
