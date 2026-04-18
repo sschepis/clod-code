@@ -23,6 +23,10 @@ const config = {
     { '@google-cloud/vertexai': 'commonjs @google-cloud/vertexai' },
     // nut.js has native bindings + heavy deps — resolved at runtime.
     { '@nut-tree-fork/nut-js': 'commonjs @nut-tree-fork/nut-js' },
+    // @xenova/transformers pulls in these native modules for ONNX inference
+    // and image processing — they must be resolved at runtime, not bundled.
+    { 'onnxruntime-node': 'commonjs onnxruntime-node' },
+    { sharp: 'commonjs sharp' },
     // ESM-only @sschepis and @aleph-ai packages are NOT listed here. They are
     // imported via the `dynamicImport()` helper at call sites, which Node.js
     // resolves natively at runtime using native dynamic ESM import.

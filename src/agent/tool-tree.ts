@@ -11,6 +11,7 @@ import {
   createAskHandler, createSecretHandler,
   createAgentSpawnHandler, createAgentQueryHandler,
   createAgentListHandler, createAgentCancelHandler,
+  createAgentBatchHandler, createAgentCollectHandler,
   createSurfaceListHandler, createSurfaceCreateHandler, createSurfaceUpdateHandler,
   createSurfaceDeleteHandler, createSurfaceOpenHandler,
   createRouteListHandler, createRouteInfoHandler, createRouteCreateHandler,
@@ -651,6 +652,28 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             reason: { type: 'string', description: 'Short cancellation reason for logs/UI' },
           },
           handler: createAgentCancelHandler(agentDeps),
+        })
+        .leaf('batch', {
+          description: 'Spawn multiple background agents and wait for all to complete. Use this when you have independent subtasks that can run in parallel. Returns all results in one response. Default mode is parallel. Sequential mode runs tasks one after another.',
+          requiredArgs: {
+            tasks: { type: 'json', description: 'Array of {task, label?, model?, provider?} objects' },
+          },
+          optionalArgs: {
+            execution_mode: { type: 'string', description: '"parallel" (default) or "sequential"' },
+            budget_usd: { type: 'number', description: 'Per-agent budget (default: $0.50)' },
+            timeout_ms: { type: 'number', description: 'Per-agent timeout (default: 300000)' },
+          },
+          handler: createAgentBatchHandler(agentDeps),
+        })
+        .leaf('collect', {
+          description: 'Wait for multiple previously-spawned agents to complete and return all their results. Use after spawning agents asynchronously when you need their results before proceeding.',
+          requiredArgs: {
+            instance_ids: { type: 'json', description: 'Array of agent instance IDs to await' },
+          },
+          optionalArgs: {
+            timeout_ms: { type: 'number', description: 'Max time to wait (default: 60000)' },
+          },
+          handler: createAgentCollectHandler(agentDeps),
         });
     });
   }

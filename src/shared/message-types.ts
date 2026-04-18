@@ -161,6 +161,8 @@ export interface AgentSummary {
   model: ModelInfo;
   cost: CostState;
   createdAt: number;
+  depth: number;            // nesting depth (0 = foreground, 1 = direct child, etc.)
+  batchId?: string;         // shared ID for agents spawned by agent/batch
   completedAt?: number;
   result?: string;
   error?: string;

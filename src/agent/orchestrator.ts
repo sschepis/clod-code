@@ -727,9 +727,9 @@ export class Orchestrator {
       },
     };
 
-    // Foreground and interactive (chat panel) agents can spawn sub-agents.
+    // Foreground, interactive, and depth-eligible background agents can spawn sub-agents.
     const agentDeps =
-      agentId === FOREGROUND_AGENT_ID || this.manager.isInteractive(agentId)
+      agentId === FOREGROUND_AGENT_ID || this.manager.isInteractive(agentId) || this.manager.canSpawnChildren(agentId)
         ? { manager: this.manager, callerId: () => agentId }
         : undefined;
 

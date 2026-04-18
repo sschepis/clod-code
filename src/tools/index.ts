@@ -16,6 +16,8 @@ export { createAgentSpawnHandler } from './agent-spawn';
 export { createAgentQueryHandler } from './agent-query';
 export { createAgentListHandler } from './agent-list';
 export { createAgentCancelHandler } from './agent-cancel';
+export { createAgentBatchHandler } from './agent-batch';
+export { createAgentCollectHandler } from './agent-collect';
 export type { AgentToolDeps } from './agent-deps';
 export {
   createMemoryAddHandler,

@@ -17,10 +17,11 @@ export interface ClodcodeSettings {
   autoCompact: boolean;
   autoCompactThreshold: number;
   instructionFile: string;
-  // ── Multi-agent (Phase 1) ────────────────────────────────────────
+  // ── Multi-agent ──────────────────────────────────────────────────
   maxConcurrentAgents: number;
   defaultAgentBudgetUsd: number;
   agentTimeoutMs: number;
+  maxAgentNestingDepth: number;
   // ── Surfaces ─────────────────────────────────────────────────────
   surfacesAutoOpen: boolean;
   // ── UI control (nut.js) ──────────────────────────────────────────
@@ -52,6 +53,7 @@ export function getSettings(): ClodcodeSettings {
     maxConcurrentAgents: cfg.get<number>('maxConcurrentAgents', 5),
     defaultAgentBudgetUsd: cfg.get<number>('defaultAgentBudgetUsd', 0.5),
     agentTimeoutMs: cfg.get<number>('agentTimeoutMs', 300_000),
+    maxAgentNestingDepth: cfg.get<number>('maxAgentNestingDepth', 2),
     surfacesAutoOpen: cfg.get<boolean>('surfacesAutoOpen', true),
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),

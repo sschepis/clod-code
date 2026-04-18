@@ -252,6 +252,13 @@
           "minimum": 1000,
           "description": "Default timeout (ms) for spawned background agents"
         },
+        "clodcode.maxAgentNestingDepth": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Maximum nesting depth for recursive agent spawning (0 = no sub-agents from background agents)"
+        },
         "clodcode.surfacesAutoOpen": {
           "type": "boolean",
           "default": true,

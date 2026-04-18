@@ -39,6 +39,8 @@ export interface SpawnOpts {
   parentId?: string;
   /** Short human label for the summary strip. Derived from task if omitted. */
   label?: string;
+  /** Shared batch ID for agents spawned together via agent/batch. */
+  batchId?: string;
 }
 
 export interface SpawnResult {
@@ -87,6 +89,9 @@ interface InstanceRecord {
   completed: boolean;
   completionResult?: CompletionResult;
   interactive?: boolean;
+  budgetUsd: number;
+  spentByChildren: number;
+  batchId?: string;
 }
 
 export interface CompletionResult {
@@ -144,6 +149,7 @@ export class AgentManager {
       model: host.getActiveModel(),
       cost: { totalTokens: 0, totalCost: 0 },
       createdAt: Date.now(),
+      depth: 0,
     };
     const record: InstanceRecord = {
       id: FOREGROUND_AGENT_ID,
@@ -153,6 +159,8 @@ export class AgentManager {
       createdAt: Date.now(),
       completionWaiters: [],
       completed: false,
+      budgetUsd: Infinity,
+      spentByChildren: 0,
     };
     record.detach = host.on((e) => this.handleForegroundEvent(e));
     this.instances.set(FOREGROUND_AGENT_ID, record);
@@ -175,6 +183,7 @@ export class AgentManager {
       model: host.getActiveModel(),
       cost: { totalTokens: 0, totalCost: 0 },
       createdAt: Date.now(),
+      depth: 0,
     };
     const record: InstanceRecord = {
       id: panelId,
@@ -185,6 +194,8 @@ export class AgentManager {
       completionWaiters: [],
       completed: false,
       interactive: true,
+      budgetUsd: Infinity,
+      spentByChildren: 0,
     };
     record.detach = host.on((e) => this.handleInteractiveEvent(panelId, e));
     this.instances.set(panelId, record);
@@ -199,6 +210,18 @@ export class AgentManager {
 
   isInteractive(agentId: string): boolean {
     return this.instances.get(agentId)?.interactive === true;
+  }
+
+  getDepth(agentId: string): number {
+    return this.instances.get(agentId)?.lineage.size ?? 0;
+  }
+
+  canSpawnChildren(agentId: string): boolean {
+    if (agentId === FOREGROUND_AGENT_ID) return true;
+    if (this.isInteractive(agentId)) return true;
+    const depth = this.getDepth(agentId);
+    const maxDepth = this.settings.maxAgentNestingDepth ?? 2;
+    return depth < maxDepth;
   }
 
   async recreateForeground(newSettings: ClodcodeSettings): Promise<void> {
@@ -242,20 +265,39 @@ export class AgentManager {
       lineage = new Set();
     }
 
-    // Phase 1 scope: reject if spawned agents try to spawn more (no teams yet).
-    // Phase 2 will gate on maxNestingDepth.
-    if (lineage.size > 0) {
+    // Depth-limited recursive spawning
+    const maxDepth = this.settings.maxAgentNestingDepth ?? 2;
+    if (lineage.size > maxDepth) {
       return {
         ok: false,
         error:
-          'Recursive agent spawning is not enabled in Phase 1. ' +
-          'Background agents cannot spawn their own sub-agents yet.',
+          `Maximum agent nesting depth (${maxDepth}) exceeded. ` +
+          `This agent is at depth ${lineage.size}. Raise "clodcode.maxAgentNestingDepth" to allow deeper nesting.`,
       };
     }
 
-    // ── Validate budget/timeout ───────────────────────────────────────
-    const budgetUsd = opts.budgetUsd ?? this.settings.defaultAgentBudgetUsd ?? 0.5;
-    const timeoutMs = opts.timeoutMs ?? this.settings.agentTimeoutMs ?? 300_000;
+    // ── Validate budget/timeout (cascade from parent) ────────────────
+    let budgetUsd = opts.budgetUsd ?? this.settings.defaultAgentBudgetUsd ?? 0.5;
+    let timeoutMs = opts.timeoutMs ?? this.settings.agentTimeoutMs ?? 300_000;
+
+    if (parentId) {
+      const parent = this.instances.get(parentId);
+      if (parent && !parent.interactive && parent.id !== FOREGROUND_AGENT_ID) {
+        const parentRemaining = parent.budgetUsd - parent.summary.cost.totalCost - parent.spentByChildren;
+        if (parentRemaining <= 0) {
+          return { ok: false, error: `Parent agent "${parentId}" has no remaining budget for child agents.` };
+        }
+        budgetUsd = Math.min(budgetUsd, parentRemaining);
+
+        const parentElapsed = Date.now() - parent.createdAt;
+        const parentTimeoutMs = parent.timeoutHandle ? (this.settings.agentTimeoutMs ?? 300_000) : Infinity;
+        const parentTimeRemaining = parentTimeoutMs - parentElapsed;
+        if (parentTimeRemaining <= 0) {
+          return { ok: false, error: `Parent agent "${parentId}" has no remaining time for child agents.` };
+        }
+        timeoutMs = Math.min(timeoutMs, Math.max(parentTimeRemaining, 5000));
+      }
+    }
     if (!opts.task || !opts.task.trim()) {
       return { ok: false, error: 'Task is required and cannot be empty.' };
     }
@@ -288,6 +330,8 @@ export class AgentManager {
       model: host.getActiveModel(),
       cost: { totalTokens: 0, totalCost: 0 },
       createdAt: Date.now(),
+      depth: lineage.size,
+      batchId: opts.batchId,
     };
 
     const record: InstanceRecord = {
@@ -299,6 +343,9 @@ export class AgentManager {
       parentId,
       completionWaiters: [],
       completed: false,
+      budgetUsd,
+      spentByChildren: 0,
+      batchId: opts.batchId,
     };
     this.instances.set(agentId, record);
     this.bridge.notifyAgentRegistered(summary);
@@ -341,8 +388,6 @@ export class AgentManager {
         budgetUsd,
         timeoutMs,
       });
-
-      void budgetUsd; // reserved for SharedBudget hookup in a follow-up
 
       return { ok: true, agentId, host };
     } catch (err) {
@@ -501,16 +546,36 @@ export class AgentManager {
   }
 
   private enforceBudget(rec: InstanceRecord): void {
-    const budget = this.settings.defaultAgentBudgetUsd ?? 0.5;
-    if (rec.summary.cost.totalCost > budget) {
+    const budget = rec.budgetUsd;
+    const totalSpent = rec.summary.cost.totalCost + rec.spentByChildren;
+    if (totalSpent > budget) {
       logger.warn(`Agent "${rec.id}" exceeded budget $${budget}`, {
-        spent: rec.summary.cost.totalCost,
+        ownSpent: rec.summary.cost.totalCost,
+        childrenSpent: rec.spentByChildren,
       });
       this.completeInstance(rec.id, {
         status: 'cancelled',
-        error: `Exceeded budget $${budget.toFixed(2)} (spent $${rec.summary.cost.totalCost.toFixed(4)})`,
+        error: `Exceeded budget $${budget.toFixed(2)} (spent $${totalSpent.toFixed(4)})`,
       });
     }
+
+    // Propagate cost to parent
+    if (rec.parentId) {
+      const parent = this.instances.get(rec.parentId);
+      if (parent && !parent.completed) {
+        this.updateParentChildCost(parent);
+      }
+    }
+  }
+
+  private updateParentChildCost(parent: InstanceRecord): void {
+    let childTotal = 0;
+    for (const inst of this.instances.values()) {
+      if (inst.parentId === parent.id) {
+        childTotal += inst.summary.cost.totalCost + inst.spentByChildren;
+      }
+    }
+    parent.spentByChildren = childTotal;
   }
 
   private completeInstance(agentId: string, result: CompletionResult): void {
@@ -519,6 +584,18 @@ export class AgentManager {
 
     rec.completed = true;
     rec.completionResult = result;
+
+    // Cascade cancellation to children
+    if (result.status === 'cancelled' || result.status === 'error') {
+      for (const [childId, child] of this.instances) {
+        if (child.parentId === agentId && !child.completed) {
+          this.completeInstance(childId, {
+            status: 'cancelled',
+            error: `Parent agent "${agentId}" ${result.status}`,
+          });
+        }
+      }
+    }
 
     // Clear timeout
     if (rec.timeoutHandle) {
