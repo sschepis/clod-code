@@ -4,7 +4,7 @@ import type { ExtToWebviewMessage, WebviewToExtMessage } from '../shared/message
 import { VIEW_ID } from '../shared/constants';
 
 /**
- * WebviewViewProvider for the Clodcode sidebar panel.
+ * WebviewViewProvider for the Oboto VS sidebar panel.
  * Manages the webview lifecycle and message routing between the
  * React UI and the agent orchestrator.
  */
@@ -122,7 +122,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <link rel="stylesheet" href="${styleUri}">
   <link rel="stylesheet" href="${indexStyleUri}">
   <link rel="modulepreload" href="${sharedUri}">
-  <title>Clodcode</title>
+  <title>Oboto</title>
 </head>
 <body>
   <div id="root"></div>

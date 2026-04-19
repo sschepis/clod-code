@@ -1,56 +1,26 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Save, RotateCcw, ScrollText, CheckCircle2, XCircle,
-  Loader2, Cpu, Globe, Key, Shield, Sliders, Eye, EyeOff, AlertTriangle,
+  Loader2, Cpu, Globe, Key, Shield, Sliders, Eye, EyeOff, Download,
+  Plus, Trash2, ArrowRight, Terminal,
 } from 'lucide-react';
 import type {
-  SettingsState, ProviderOption,
+  SettingsState, ProviderOption, SettingsProviderConfig, SettingsRouteAssignment,
   SettingsExtToWebview, SettingsWebviewToExt,
 } from '../../src/shared/message-types';
 
-// Duplicated from src/config/model-inference.ts — we can't cross-import
-// between extension-host and webview bundles.
-const MODEL_PATTERNS: Array<[RegExp, string]> = [
-  [/^claude[-_]/i, 'anthropic'],
-  [/^(gpt[-_]|o1[-_]?|o3[-_]?|chatgpt[-_])/i, 'openai'],
-  [/^gemini[-_]/i, 'gemini'],
-  [/^deepseek[-_]/i, 'deepseek'],
-  [/^(llama|qwen|mistral|mixtral|phi|codellama|starcoder|deepseek-coder|gemma|yi)/i, 'ollama'],
+const PROVIDER_TYPES = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Google Gemini' },
+  { value: 'vertex-gemini', label: 'Vertex AI (Gemini)' },
+  { value: 'vertex-anthropic', label: 'Vertex AI (Anthropic)' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'azure-openai', label: 'Azure OpenAI' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'lmstudio', label: 'LM Studio' },
 ];
-
-function inferProviderFromModel(model: string): string | null {
-  if (!model) return null;
-  for (const [pattern, provider] of MODEL_PATTERNS) {
-    if (pattern.test(model)) return provider;
-  }
-  return null;
-}
-
-function isModelCompatibleWithProvider(model: string, provider: string): boolean {
-  const inferred = inferProviderFromModel(model);
-  if (inferred === null) return true;
-  if (provider === 'vertex-gemini' && inferred === 'gemini') return true;
-  if (provider === 'vertex-anthropic' && inferred === 'anthropic') return true;
-  if (provider === 'openrouter') return true;
-  if ((provider === 'ollama' || provider === 'lmstudio') && inferred === 'ollama') return true;
-  return inferred === provider;
-}
-
-const PROVIDER_MODEL_SUGGESTIONS: Record<string, string[]> = {
-  anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
-  gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro'],
-  'vertex-gemini': ['gemini-2.0-flash', 'gemini-1.5-pro'],
-  'vertex-anthropic': ['claude-sonnet-4@20250514', 'claude-opus-4@20250514'],
-  deepseek: ['deepseek-chat', 'deepseek-coder'],
-  openrouter: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.0-flash'],
-  ollama: ['llama3:8b', 'llama3.1:8b', 'qwen2.5-coder:7b'],
-  lmstudio: ['llama-3.1-8b-instruct', 'qwen2.5-coder-7b-instruct'],
-};
-
-function getDefaultModelForProvider(provider: string): string {
-  return PROVIDER_MODEL_SUGGESTIONS[provider]?.[0] ?? '';
-}
 
 declare function acquireVsCodeApi(): {
   postMessage(msg: SettingsWebviewToExt): void;
@@ -68,6 +38,13 @@ const PERMISSION_MODES = [
   { value: 'prompt', label: 'Prompt (recommended)', description: 'Ask before each potentially dangerous operation.' },
 ];
 
+const ROUTING_ROLES = [
+  { key: 'triage' as const, label: 'Triage', description: 'Quick classification — a fast, cheap model works well' },
+  { key: 'executor' as const, label: 'Executor', description: 'Main task execution — the workhorse model' },
+  { key: 'planner' as const, label: 'Planner', description: 'Planning and architecture' },
+  { key: 'summarizer' as const, label: 'Summarizer', description: 'Compaction and summarization' },
+];
+
 interface TestResult {
   success: boolean;
   message: string;
@@ -76,31 +53,30 @@ interface TestResult {
 
 export default function SettingsApp() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [draft, setDraft] = useState<Partial<SettingsState>>({});
   const [saveStatus, setSaveStatus] = useState<{ success: boolean; message: string } | null>(null);
-  const [localTest, setLocalTest] = useState<TestResult | null>(null);
-  const [remoteTest, setRemoteTest] = useState<TestResult | null>(null);
-  const [testing, setTesting] = useState<{ local?: boolean; remote?: boolean }>({});
-  const [showRemoteApiKey, setShowRemoteApiKey] = useState(false);
-  const [showLocalApiKey, setShowLocalApiKey] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
+  const [pulling, setPulling] = useState(false);
+  const [pullStatus, setPullStatus] = useState<string | null>(null);
+  const [pullError, setPullError] = useState<string | null>(null);
+  const [showApiKeys, setShowApiKeys] = useState<Set<string>>(new Set());
+  const [addingProvider, setAddingProvider] = useState(false);
+  const [newProviderType, setNewProviderType] = useState('anthropic');
 
-  // Listen for messages from extension host
   useEffect(() => {
     const listener = (e: MessageEvent<SettingsExtToWebview>) => {
       const msg = e.data;
       switch (msg.type) {
         case 'sync':
           setSettings(msg.settings);
-          setProviders(msg.providers);
+          setProviderOptions(msg.providers);
           setDraft({});
           break;
         case 'save_result': {
           setSaveStatus({ success: msg.success, message: msg.message });
           setTimeout(() => setSaveStatus(null), 4000);
-          // Merge successfully saved keys into local settings and remove
-          // them from the draft so the form reflects authoritative state
-          // without a full re-sync (which would wipe any pending edits).
           const saved = msg.saved || {};
           if (Object.keys(saved).length > 0) {
             setSettings(prev => prev ? { ...prev, ...saved } : prev);
@@ -116,15 +92,21 @@ export default function SettingsApp() {
         }
         case 'connection_test': {
           const result: TestResult = { success: msg.success, message: msg.message, timestamp: Date.now() };
-          if (msg.target === 'local') {
-            setLocalTest(result);
-            setTesting(t => ({ ...t, local: false }));
-          } else {
-            setRemoteTest(result);
-            setTesting(t => ({ ...t, remote: false }));
-          }
+          setTestResults(prev => ({ ...prev, [msg.providerId]: result }));
+          setTestingIds(prev => { const next = new Set(prev); next.delete(msg.providerId); return next; });
           break;
         }
+        case 'model_pull_progress':
+          setPulling(true);
+          setPullStatus(msg.status);
+          setPullError(null);
+          break;
+        case 'model_pull_complete':
+          setPulling(false);
+          setPullStatus(null);
+          if (!msg.success) setPullError(msg.error ?? 'Pull failed');
+          else setPullError(null);
+          break;
       }
     };
     window.addEventListener('message', listener);
@@ -140,34 +122,54 @@ export default function SettingsApp() {
     setDraft(d => ({ ...d, [key]: val }));
   }, []);
 
-  /**
-   * When the user switches providers, if the current model doesn't match
-   * the new provider, offer to replace it with a sensible default.
-   * This prevents the classic "provider=anthropic but model=gemini-*" footgun.
-   */
-  const updateProviderWithModelSync = useCallback((
-    providerKey: 'localProvider' | 'remoteProvider',
-    modelKey: 'localModel' | 'remoteModel',
-    newProvider: string,
-  ) => {
-    setDraft(d => {
-      const next = { ...d, [providerKey]: newProvider };
-      // Get the current model (from draft or settings)
-      const currentModel = (d[modelKey] ?? settings?.[modelKey] ?? '') as string;
-      if (currentModel && !isModelCompatibleWithProvider(currentModel, newProvider)) {
-        const suggested = getDefaultModelForProvider(newProvider);
-        if (suggested) {
-          (next as any)[modelKey] = suggested;
-        }
-      } else if (!currentModel) {
-        const suggested = getDefaultModelForProvider(newProvider);
-        if (suggested) {
-          (next as any)[modelKey] = suggested;
-        }
+  const currentProviders = (): Record<string, SettingsProviderConfig> => {
+    return (draft.providers ?? settings?.providers ?? {}) as Record<string, SettingsProviderConfig>;
+  };
+
+  const currentRouting = (): Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer', SettingsRouteAssignment>> => {
+    return (draft.routing ?? settings?.routing ?? {}) as any;
+  };
+
+  const updateProvider = (id: string, config: SettingsProviderConfig) => {
+    const providers = { ...currentProviders(), [id]: config };
+    update('providers', providers);
+  };
+
+  const removeProvider = (id: string) => {
+    const providers = { ...currentProviders() };
+    delete providers[id];
+    update('providers', providers);
+    const routing = { ...currentRouting() };
+    for (const [role, assignment] of Object.entries(routing)) {
+      if (assignment?.providerId === id) {
+        delete (routing as any)[role];
       }
-      return next;
-    });
-  }, [settings]);
+    }
+    update('routing', routing);
+  };
+
+  const addProvider = () => {
+    const providers = currentProviders();
+    const typeLabel = PROVIDER_TYPES.find(t => t.value === newProviderType)?.label ?? newProviderType;
+    let id = newProviderType;
+    let counter = 2;
+    while (providers[id]) {
+      id = `${newProviderType}-${counter++}`;
+    }
+    updateProvider(id, { type: newProviderType, label: typeLabel });
+    setAddingProvider(false);
+    setNewProviderType('anthropic');
+  };
+
+  const updateRoute = (role: string, assignment: SettingsRouteAssignment | undefined) => {
+    const routing = { ...currentRouting() };
+    if (assignment) {
+      (routing as any)[role] = assignment;
+    } else {
+      delete (routing as any)[role];
+    }
+    update('routing', routing);
+  };
 
   const handleSave = () => {
     if (Object.keys(draft).length === 0) return;
@@ -175,20 +177,35 @@ export default function SettingsApp() {
   };
 
   const handleReset = () => {
-    if (!confirm('Reset all settings to defaults? This will clear API keys.')) return;
+    if (!confirm('Reset all settings to defaults? This will clear API keys and provider configurations.')) return;
     vscode.postMessage({ type: 'reset_to_defaults' });
   };
 
-  const handleTest = (target: 'local' | 'remote') => {
-    setTesting(t => ({ ...t, [target]: true }));
-    if (target === 'local') setLocalTest(null);
-    else setRemoteTest(null);
-    // Send current draft so the user can test their unsaved changes
-    vscode.postMessage({ type: 'test_connection', target, overrides: draft });
+  const handleTest = (providerId: string, model: string) => {
+    setTestingIds(prev => new Set(prev).add(providerId));
+    setTestResults(prev => { const next = { ...prev }; delete next[providerId]; return next; });
+    vscode.postMessage({ type: 'test_connection', providerId, model });
+  };
+
+  const handlePullModel = (model: string) => {
+    if (!model) return;
+    setPulling(true);
+    setPullStatus('Starting...');
+    setPullError(null);
+    vscode.postMessage({ type: 'pull_model', model });
   };
 
   const handleOpenLogs = () => {
     vscode.postMessage({ type: 'open_logs' });
+  };
+
+  const toggleApiKeyVisibility = (id: string) => {
+    setShowApiKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   if (!settings) {
@@ -201,8 +218,20 @@ export default function SettingsApp() {
   }
 
   const hasChanges = Object.keys(draft).length > 0;
-  const localProvider = providers.find(p => p.name === value('localProvider'));
-  const remoteProvider = providers.find(p => p.name === value('remoteProvider'));
+  const providers = currentProviders();
+  const routing = currentRouting();
+
+  const allProviderChoices: Array<{ id: string; label: string }> = [
+    { id: 'oboto', label: 'Oboto Local' },
+    ...Object.entries(providers).map(([id, cfg]) => ({
+      id,
+      label: cfg.label || id,
+    })),
+  ];
+
+  const getModelsForProviderId = (providerId: string): string[] => {
+    return providerOptions.find(p => p.id === providerId)?.models ?? [];
+  };
 
   return (
     <div className="h-screen flex flex-col bg-[#121214] text-zinc-200 overflow-hidden">
@@ -211,9 +240,9 @@ export default function SettingsApp() {
         <div>
           <h1 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
             <Sliders size={18} className="text-indigo-400" />
-            Clodcode Settings
+            Oboto Settings
           </h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Configure LLM providers, permissions, and behavior</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Configure providers, routing, permissions, and behavior</p>
         </div>
         <button
           onClick={handleOpenLogs}
@@ -230,206 +259,92 @@ export default function SettingsApp() {
       >
         <div className="max-w-3xl mx-auto px-6 py-6 space-y-8">
 
-        {/* Remote Provider Section */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Globe size={16} className="text-indigo-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Remote Provider</h2>
-            <span className="text-xs text-zinc-500">(powerful model for complex tasks)</span>
-          </div>
-
-          <Field label="Provider">
-            <select
-              value={value('remoteProvider')}
-              onChange={e => updateProviderWithModelSync('remoteProvider', 'remoteModel', e.target.value)}
-              className="select"
-            >
-              {providers.filter(p => !p.isLocal || p.name === 'ollama' || p.name === 'lmstudio').map(p => (
-                <option key={p.name} value={p.name}>{p.displayName}</option>
-              ))}
-            </select>
-            {remoteProvider?.requiresApiKey && (
-              <div className="text-xs text-zinc-500 mt-1.5 flex items-center gap-1.5">
-                <Key size={12} />
-                Requires API key. Env var: <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400">{remoteProvider.envKeyVar}</code>
-                {remoteProvider.envKeySet && <span className="text-emerald-500">✓ env var detected</span>}
-              </div>
-            )}
-          </Field>
-
-          <Field label="Model">
-            <input
-              type="text"
-              list="remote-model-suggestions"
-              value={value('remoteModel') || ''}
-              onChange={e => update('remoteModel', e.target.value)}
-              placeholder={getDefaultModelForProvider(value('remoteProvider') || 'anthropic')}
-              className="input"
-            />
-            <datalist id="remote-model-suggestions">
-              {(PROVIDER_MODEL_SUGGESTIONS[value('remoteProvider') || 'anthropic'] || []).map(m => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            {value('remoteModel') && !isModelCompatibleWithProvider(value('remoteModel'), value('remoteProvider')) && (
-              <div className="mt-2 p-2 bg-red-900/30 border border-red-800/50 rounded text-xs text-red-200 flex items-start gap-2">
-                <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-medium">Model / provider mismatch</div>
-                  <div className="mt-0.5">
-                    "{value('remoteModel')}" looks like a{' '}
-                    <strong className="text-red-100">
-                      {providers.find(p => p.name === inferProviderFromModel(value('remoteModel')))?.displayName ?? inferProviderFromModel(value('remoteModel'))}
-                    </strong>{' '}
-                    model, but the selected provider is{' '}
-                    <strong className="text-red-100">{remoteProvider?.displayName}</strong>.
-                    The agent will fail to start. Change one of them.
-                  </div>
-                </div>
-              </div>
-            )}
-          </Field>
-
-          {remoteProvider?.requiresApiKey && (
-            <Field label="API Key">
-              <div className="relative">
-                <input
-                  type={showRemoteApiKey ? 'text' : 'password'}
-                  value={value('remoteApiKey') || ''}
-                  onChange={e => update('remoteApiKey', e.target.value)}
-                  placeholder={remoteProvider.envKeySet ? `Using ${remoteProvider.envKeyVar} env var` : 'Paste your API key'}
-                  className="input pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowRemoteApiKey(s => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
-                >
-                  {showRemoteApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-              <p className="text-xs text-zinc-500 mt-1.5">
-                Stored in VS Code settings. Env var ({remoteProvider.envKeyVar}) takes precedence if set.
-              </p>
-            </Field>
-          )}
-
-          <TestButton
-            label="Test remote connection"
-            onClick={() => handleTest('remote')}
-            testing={!!testing.remote}
-            result={remoteTest}
-          />
-        </section>
-
-        {/* Local Provider Section */}
+        {/* ── Providers Section ────────────────────────────────── */}
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Cpu size={16} className="text-emerald-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Local Provider</h2>
-            <span className="text-xs text-zinc-500">(fast triage model)</span>
+            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Providers</h2>
+            <span className="text-xs text-zinc-500">Configure LLM connections</span>
           </div>
 
-          <Field label="Provider">
-            <select
-              value={value('localProvider')}
-              onChange={e => updateProviderWithModelSync('localProvider', 'localModel', e.target.value)}
-              className="select"
-            >
-              {providers.map(p => (
-                <option key={p.name} value={p.name}>{p.displayName}</option>
-              ))}
-            </select>
-          </Field>
+          {/* Managed Oboto Local provider card */}
+          <ManagedProviderCard
+            providerOptions={providerOptions}
+            pulling={pulling}
+            pullStatus={pullStatus}
+            pullError={pullError}
+            onPull={handlePullModel}
+            onTest={(model) => handleTest('oboto', model)}
+            testing={testingIds.has('oboto')}
+            testResult={testResults['oboto'] ?? null}
+          />
 
-          <Field label="Model">
-            <input
-              type="text"
-              list="local-model-suggestions"
-              value={value('localModel') || ''}
-              onChange={e => update('localModel', e.target.value)}
-              placeholder={getDefaultModelForProvider(value('localProvider') || 'ollama')}
-              className="input"
-            />
-            <datalist id="local-model-suggestions">
-              {(PROVIDER_MODEL_SUGGESTIONS[value('localProvider') || 'ollama'] || []).map(m => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            {value('localModel') && !isModelCompatibleWithProvider(value('localModel'), value('localProvider')) && (
-              <div className="mt-2 p-2 bg-amber-900/30 border border-amber-800/50 rounded text-xs text-amber-200 flex items-start gap-2">
-                <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
-                <span>
-                  "{value('localModel')}" looks unusual for {localProvider?.displayName}.
-                  Pick a suggested model above, or confirm this is what you want.
-                </span>
-              </div>
-            )}
-          </Field>
-
-          {localProvider?.isLocal && (
-            <Field label="Base URL">
-              <input
-                type="text"
-                value={value('localBaseUrl') || ''}
-                onChange={e => update('localBaseUrl', e.target.value)}
-                placeholder={localProvider.defaultBaseUrl}
-                className="input"
+          {/* User-configured providers */}
+          {Object.entries(providers).map(([id, config]) => {
+            const option = providerOptions.find(p => p.id === id);
+            return (
+              <ProviderCard
+                key={id}
+                id={id}
+                config={config}
+                option={option}
+                showApiKey={showApiKeys.has(id)}
+                onToggleApiKey={() => toggleApiKeyVisibility(id)}
+                onChange={(cfg) => updateProvider(id, cfg)}
+                onDelete={() => removeProvider(id)}
+                onTest={(model) => handleTest(id, model)}
+                testing={testingIds.has(id)}
+                testResult={testResults[id] ?? null}
               />
-              {(() => {
-                const url = (value('localBaseUrl') || '').trim();
-                if (!url) return null;
-                // Try to detect missing /v1 for OpenAI-compatible local servers
-                let hasPath = false;
-                try {
-                  const parsed = new URL(url);
-                  hasPath = Boolean(parsed.pathname && parsed.pathname !== '/');
-                } catch { return null; }
-                if (!hasPath) {
-                  return (
-                    <div className="mt-2 p-2 bg-amber-900/30 border border-amber-800/50 rounded text-xs text-amber-200 flex items-start gap-2">
-                      <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
-                      <span>
-                        {localProvider.displayName} expects the OpenAI-compatible API under <code className="bg-zinc-900 px-1 rounded">/v1</code>.
-                        Clodcode will automatically use <code className="bg-zinc-900 px-1 rounded">{url.replace(/\/+$/, '')}/v1</code>.
-                      </span>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </Field>
-          )}
+            );
+          })}
 
-          {/* API Key field for commercial local providers */}
-          {localProvider?.requiresApiKey && (
-            <Field label="API Key">
-              <div className="relative">
-                <input
-                  type={showLocalApiKey ? 'text' : 'password'}
-                  value={value('localApiKey') || ''}
-                  onChange={e => update('localApiKey', e.target.value)}
-                  placeholder={localProvider.envKeySet ? `Using ${localProvider.envKeyVar} env var` : 'Paste your API key'}
-                  className="input pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowLocalApiKey(s => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
+          {/* Add provider */}
+          {addingProvider ? (
+            <div className="p-4 border border-dashed border-zinc-700 rounded-lg space-y-3">
+              <Field label="Provider type">
+                <select
+                  value={newProviderType}
+                  onChange={e => setNewProviderType(e.target.value)}
+                  className="select"
                 >
-                  {showLocalApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {PROVIDER_TYPES.map(t => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={addProvider}
+                  className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors flex items-center gap-1.5"
+                >
+                  <Plus size={12} /> Add
+                </button>
+                <button
+                  onClick={() => setAddingProvider(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 rounded transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
-              <div className="text-xs text-zinc-500 mt-1.5 flex items-center gap-1.5">
-                <Key size={12} />
-                Requires API key. Env var: <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400">{localProvider.envKeyVar}</code>
-                {localProvider.envKeySet && <span className="text-emerald-500">✓ env var detected</span>}
-              </div>
-              <p className="text-xs text-zinc-500 mt-1">
-                Stored in VS Code settings. Env var takes precedence if set.
-              </p>
-            </Field>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingProvider(true)}
+              className="w-full p-3 border border-dashed border-zinc-700 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Plus size={14} /> Add Provider
+            </button>
           )}
+        </section>
+
+        {/* ── Routing Section ────────────────────────────────── */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <ArrowRight size={16} className="text-indigo-400" />
+            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Routing</h2>
+            <span className="text-xs text-zinc-500">Assign providers to task roles</span>
+          </div>
 
           <Field label="">
             <label className="flex items-start gap-2 text-sm text-zinc-300 cursor-pointer">
@@ -442,33 +357,85 @@ export default function SettingsApp() {
               <span>
                 <span className="font-medium">Enable dual-LLM triage</span>
                 <div className="text-xs text-zinc-500 mt-0.5 font-normal">
-                  Use the local model to classify whether a query needs the remote model.
-                  Saves cost, but requires a local model that can reliably produce structured JSON
-                  (e.g. Llama 3.1, Qwen 2.5, Mistral). If triage keeps failing, <strong>turn this off</strong> —
-                  Clodcode will route everything through the remote model instead.
+                  Use a separate model to classify whether a query needs the main executor model.
+                  Saves cost on simple queries.
                 </div>
               </span>
             </label>
           </Field>
 
-          {value('triageEnabled') === false && (
-            <div className="mt-2 p-2 bg-blue-900/30 border border-blue-800/50 rounded text-xs text-blue-200 flex items-start gap-2">
-              <span>
-                <strong>Triage disabled:</strong> Local provider settings above are ignored.
-                Everything runs through your remote provider (shown in the Remote Provider section).
-              </span>
-            </div>
-          )}
+          {ROUTING_ROLES.map(role => {
+            const assignment = routing[role.key];
+            const isOptional = role.key === 'planner' || role.key === 'summarizer';
+            const isTriageDisabled = role.key === 'triage' && !(value('triageEnabled') ?? true);
+            const models = assignment?.providerId ? getModelsForProviderId(assignment.providerId) : [];
 
-          <TestButton
-            label="Test local connection"
-            onClick={() => handleTest('local')}
-            testing={!!testing.local}
-            result={localTest}
-          />
+            return (
+              <div
+                key={role.key}
+                className={`p-4 rounded-lg border ${
+                  isTriageDisabled ? 'opacity-50 border-zinc-800 bg-zinc-900/20' : 'border-zinc-800 bg-zinc-900/40'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-medium text-zinc-200">{role.label}</span>
+                  <span className="text-xs text-zinc-500">{role.description}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Provider</label>
+                    <select
+                      value={assignment?.providerId ?? (isOptional ? '' : 'oboto')}
+                      onChange={e => {
+                        const pid = e.target.value;
+                        if (!pid && isOptional) {
+                          updateRoute(role.key, undefined);
+                        } else {
+                          updateRoute(role.key, { providerId: pid, model: assignment?.model });
+                        }
+                      }}
+                      disabled={isTriageDisabled}
+                      className="select"
+                    >
+                      {isOptional && <option value="">Same as executor</option>}
+                      {allProviderChoices.map(p => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Model</label>
+                    <select
+                      value={assignment?.model ?? ''}
+                      onChange={e => {
+                        if (!assignment?.providerId && !isOptional) return;
+                        const pid = assignment?.providerId ?? 'oboto';
+                        updateRoute(role.key, { providerId: pid, model: e.target.value || undefined });
+                      }}
+                      disabled={isTriageDisabled || (!assignment?.providerId && isOptional)}
+                      className="select"
+                    >
+                      <option value="">Provider default</option>
+                      {models.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {isTriageDisabled && (
+                  <div className="mt-2 text-xs text-zinc-500">
+                    Triage disabled — all queries go directly to the executor.
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </section>
 
-        {/* Permissions Section */}
+        {/* ── Permissions Section ────────────────────────────── */}
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Shield size={16} className="text-amber-400" />
@@ -504,7 +471,7 @@ export default function SettingsApp() {
           </Field>
         </section>
 
-        {/* Behavior Section */}
+        {/* ── Behavior Section ────────────────────────────────── */}
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Sliders size={16} className="text-cyan-400" />
@@ -515,8 +482,8 @@ export default function SettingsApp() {
             <Field label="Max iterations per turn">
               <input
                 type="number"
-                value={value('maxIterations') ?? 25}
-                onChange={e => update('maxIterations', parseInt(e.target.value, 10) || 25)}
+                value={value('maxIterations') ?? 50}
+                onChange={e => update('maxIterations', parseInt(e.target.value, 10) || 50)}
                 min={1}
                 max={100}
                 className="input"
@@ -572,11 +539,31 @@ export default function SettingsApp() {
               File names searched up the directory tree to load project-specific instructions.
             </p>
           </Field>
+
+          <Field label="">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Terminal size={14} className="text-zinc-400" />
+              <label className="text-xs font-medium text-zinc-400">Default shell</label>
+            </div>
+            <select
+              value={value('shell') ?? ''}
+              onChange={e => update('shell', e.target.value)}
+              className="select"
+            >
+              <option value="">Auto-detect</option>
+              <option value="/bin/zsh">Zsh</option>
+              <option value="/bin/bash">Bash</option>
+              <option value="/bin/sh">POSIX sh</option>
+            </select>
+            <p className="text-xs text-zinc-500 mt-1.5">
+              Shell used for tool commands. Auto-detect uses your $SHELL environment variable.
+            </p>
+          </Field>
         </section>
         </div>
       </div>
 
-      {/* Action bar (flex child, not fixed-positioned, so content area scrolls freely) */}
+      {/* Action bar */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-zinc-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3 text-xs">
           {saveStatus && (
@@ -611,7 +598,6 @@ export default function SettingsApp() {
         </div>
       </div>
 
-      {/* Inline styles to avoid depending on Tailwind for form elements */}
       <style>{`
         .input, .select {
           width: 100%;
@@ -629,6 +615,10 @@ export default function SettingsApp() {
           border-color: #6366f1;
           box-shadow: 0 0 0 1px #6366f1;
         }
+        .input:disabled, .select:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
         .checkbox {
           width: 1rem;
           height: 1rem;
@@ -639,6 +629,8 @@ export default function SettingsApp() {
   );
 }
 
+/* ── Sub-components ──────────────────────────────────────────────── */
+
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>
     {label && <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>}
@@ -646,27 +638,250 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
   </div>
 );
 
+interface ManagedProviderCardProps {
+  providerOptions: ProviderOption[];
+  pulling: boolean;
+  pullStatus: string | null;
+  pullError: string | null;
+  onPull: (model: string) => void;
+  onTest: (model: string) => void;
+  testing: boolean;
+  testResult: TestResult | null;
+}
+
+const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
+  providerOptions, pulling, pullStatus, pullError, onPull, onTest, testing, testResult,
+}) => {
+  const managed = providerOptions.find(p => p.managed);
+  const models = managed?.models ?? [];
+  const isRunning = managed?.serviceRunning ?? false;
+  const [selectedModel, setSelectedModel] = useState('');
+
+  useEffect(() => {
+    if (models.length > 0 && (!selectedModel || !models.includes(selectedModel))) {
+      setSelectedModel(models[0]);
+    }
+  }, [models]);
+
+  return (
+    <div className="p-4 rounded-lg border border-emerald-900/50 bg-emerald-950/20 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Cpu size={16} className="text-emerald-400" />
+          <span className="text-sm font-medium text-zinc-200">Oboto Local</span>
+          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-800/40">
+            managed
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`inline-block w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+          <span className="text-xs text-zinc-500">
+            Ollama {isRunning ? 'running' : 'offline'}
+          </span>
+        </div>
+      </div>
+
+      {!isRunning && (
+        <div className="p-2.5 bg-amber-900/20 border border-amber-800/40 rounded text-xs text-amber-200 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin text-amber-400 flex-shrink-0" />
+          <span>Setting up Ollama automatically...</span>
+        </div>
+      )}
+
+      <Field label="Model">
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          className="select"
+        >
+          {models.length === 0 && (
+            <option value="" disabled>
+              {isRunning ? 'No models installed' : 'Ollama offline'}
+            </option>
+          )}
+          {models.map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </Field>
+
+      {pulling && pullStatus && (
+        <div className="p-2 bg-indigo-900/30 border border-indigo-800/50 rounded text-xs text-indigo-200 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin text-indigo-400 flex-shrink-0" />
+          <span>{pullStatus}</span>
+        </div>
+      )}
+      {pullError && !pulling && (
+        <div className="p-2 bg-red-900/30 border border-red-800/50 rounded text-xs text-red-200 flex items-start gap-2">
+          <XCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+          <span>{pullError}</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <TestButton
+          label="Test"
+          onClick={() => onTest(selectedModel)}
+          testing={testing}
+          result={testResult}
+          disabled={!selectedModel}
+        />
+        <button
+          onClick={() => {
+            const name = prompt('Model name to pull (e.g. llama3.1:8b):');
+            if (name?.trim()) onPull(name.trim());
+          }}
+          disabled={pulling}
+          className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <Download size={12} /> Pull model
+        </button>
+      </div>
+    </div>
+  );
+};
+
+interface ProviderCardProps {
+  id: string;
+  config: SettingsProviderConfig;
+  option?: ProviderOption;
+  showApiKey: boolean;
+  onToggleApiKey: () => void;
+  onChange: (config: SettingsProviderConfig) => void;
+  onDelete: () => void;
+  onTest: (model: string) => void;
+  testing: boolean;
+  testResult: TestResult | null;
+}
+
+const ProviderCard: React.FC<ProviderCardProps> = ({
+  id, config, option, showApiKey, onToggleApiKey, onChange, onDelete, onTest, testing, testResult,
+}) => {
+  const models = option?.models ?? [];
+  const selectedModel = config.defaultModel || models[0] || '';
+
+  return (
+    <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-900/40 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Globe size={16} className="text-indigo-400" />
+          <span className="text-sm font-medium text-zinc-200">{config.label || id}</span>
+          <span className="text-xs text-zinc-500">({config.type})</span>
+        </div>
+        <button
+          onClick={onDelete}
+          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+          title="Remove provider"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Display name">
+          <input
+            type="text"
+            value={config.label || ''}
+            onChange={e => onChange({ ...config, label: e.target.value })}
+            placeholder={PROVIDER_TYPES.find(t => t.value === config.type)?.label ?? config.type}
+            className="input"
+          />
+        </Field>
+
+        <Field label="Default model">
+          {models.length > 0 ? (
+            <select
+              value={selectedModel}
+              onChange={e => onChange({ ...config, defaultModel: e.target.value })}
+              className="select"
+            >
+              {models.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          ) : (
+            <select disabled className="select">
+              <option>Save to fetch models</option>
+            </select>
+          )}
+        </Field>
+      </div>
+
+      {option?.requiresApiKey && (
+        <Field label="API Key">
+          <div className="relative">
+            <input
+              type={showApiKey ? 'text' : 'password'}
+              value={config.apiKey || ''}
+              onChange={e => onChange({ ...config, apiKey: e.target.value })}
+              placeholder={option.envKeySet ? `Using ${option.envKeyVar} env var` : 'Paste your API key'}
+              className="input pr-10"
+            />
+            <button
+              type="button"
+              onClick={onToggleApiKey}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
+            >
+              {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <div className="text-xs text-zinc-500 mt-1.5 flex items-center gap-1.5">
+            <Key size={12} />
+            Env var: <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400">{option.envKeyVar}</code>
+            {option.envKeySet && <span className="text-emerald-500">detected</span>}
+          </div>
+        </Field>
+      )}
+
+      {config.baseUrl !== undefined && (
+        <Field label="Base URL">
+          <input
+            type="text"
+            value={config.baseUrl || ''}
+            onChange={e => onChange({ ...config, baseUrl: e.target.value })}
+            placeholder={option?.defaultBaseUrl || 'Default'}
+            className="input"
+          />
+        </Field>
+      )}
+
+      <div className="flex items-center gap-3">
+        <TestButton
+          label="Test connection"
+          onClick={() => onTest(selectedModel)}
+          testing={testing}
+          result={testResult}
+        />
+      </div>
+    </div>
+  );
+};
+
 interface TestButtonProps {
   label: string;
   onClick: () => void;
   testing: boolean;
   result: TestResult | null;
+  disabled?: boolean;
 }
 
-const TestButton: React.FC<TestButtonProps> = ({ label, onClick, testing, result }) => (
-  <div className="flex items-center gap-3">
+const TestButton: React.FC<TestButtonProps> = ({ label, onClick, testing, result, disabled }) => (
+  <div className="flex items-center gap-3 min-w-0">
     <button
       onClick={onClick}
-      disabled={testing}
-      className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50"
+      disabled={testing || disabled}
+      className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50 flex-shrink-0"
     >
       {testing ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
       {testing ? 'Testing...' : label}
     </button>
     {result && (
-      <span className={`text-xs flex items-center gap-1.5 ${result.success ? 'text-emerald-400' : 'text-red-400'}`}>
-        {result.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-        {result.message}
+      <span
+        className={`text-xs flex items-center gap-1.5 min-w-0 ${result.success ? 'text-emerald-400' : 'text-red-400'}`}
+        title={result.message}
+      >
+        {result.success ? <CheckCircle2 size={14} className="flex-shrink-0" /> : <XCircle size={14} className="flex-shrink-0" />}
+        <span className="truncate">{result.message.length > 80 ? result.message.slice(0, 77) + '...' : result.message}</span>
       </span>
     )}
   </div>

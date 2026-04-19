@@ -12,9 +12,11 @@ interface MessageBubbleProps {
   attachments?: any[];
   model?: string;
   onRevert: (id: string) => void;
+  onEdit?: (id: string, content: string) => void;
+  onDelete?: (id: string) => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content, timestamp, model, attachments, onRevert }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content, timestamp, model, attachments, onRevert, onEdit, onDelete }) => {
   const isUser = role === 'user';
 
   let isToolResult = false;
@@ -36,7 +38,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content,
     <div className={`group relative flex gap-4 px-6 py-5 border-b border-zinc-800/50 transition-colors ${
       isUser ? (isToolResult ? 'bg-transparent hover:bg-zinc-900/30' : 'bg-zinc-900/50 hover:bg-zinc-900/80') : 'bg-transparent hover:bg-zinc-900/30'
     }`}>
-      <ActionMenu content={content} onRevert={onRevert} id={id} />
+      <ActionMenu content={content} onRevert={onRevert} onEdit={onEdit} onDelete={onDelete} id={id} role={role} />
 
       <div className="flex-shrink-0 mt-1">
         {isToolResult ? (

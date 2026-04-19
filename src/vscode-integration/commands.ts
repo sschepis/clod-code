@@ -36,11 +36,11 @@ export function registerCommands(
     })
   );
 
-  // Open a surface (webview panel rendered from .clodcode/surfaces/<name>.html)
+  // Open a surface (webview panel rendered from .obotovs/surfaces/<name>.html)
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.OPEN_SURFACE, async (surfaceName?: string) => {
       if (!orchestrator) {
-        vscode.window.showWarningMessage('Clodcode orchestrator is not available.');
+        vscode.window.showWarningMessage('Oboto VS orchestrator is not available.');
         return;
       }
       if (surfaceName) {
@@ -55,7 +55,7 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.FOCUS_CHAT, () => {
       if (!sidebar) {
-        vscode.window.showWarningMessage('Clodcode chat panel is not available.');
+        vscode.window.showWarningMessage('Oboto VS chat panel is not available.');
         return;
       }
       sidebar.focus();
@@ -68,7 +68,7 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.NEW_SESSION, async () => {
       if (!sidebar) {
-        vscode.window.showWarningMessage('Clodcode is not initialized. Check the output log.');
+        vscode.window.showWarningMessage('Oboto VS is not initialized. Check the output log.');
         return;
       }
       const confirm = await vscode.window.showWarningMessage(
@@ -93,7 +93,7 @@ export function registerCommands(
     vscode.commands.registerCommand(COMMANDS.SWITCH_MODEL, async () => {
       if (!orchestrator) {
         vscode.window.showWarningMessage(
-          'Clodcode agent is not initialized. Open Settings to configure a provider.'
+          'Oboto VS agent is not initialized. Open Settings to configure a provider.'
         );
         return;
       }
@@ -133,7 +133,7 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.ASK_ABOUT_SELECTION, async () => {
       if (!sidebar) {
-        vscode.window.showWarningMessage('Clodcode chat panel is not available.');
+        vscode.window.showWarningMessage('Oboto VS chat panel is not available.');
         return;
       }
 
@@ -176,7 +176,7 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.NEW_CHAT, async () => {
       if (!chatPanelManager) {
-        vscode.window.showWarningMessage('Clodcode is not initialized.');
+        vscode.window.showWarningMessage('Oboto VS is not initialized.');
         return;
       }
       const label = await vscode.window.showInputBox({
@@ -191,12 +191,12 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.LIST_CHATS, async () => {
       if (!chatPanelManager) {
-        vscode.window.showWarningMessage('Clodcode is not initialized.');
+        vscode.window.showWarningMessage('Oboto VS is not initialized.');
         return;
       }
       const panels = chatPanelManager.listPanels();
       if (panels.length === 0) {
-        vscode.window.showInformationMessage('No additional chat windows open. Use "Clodcode: New Chat Window" to create one.');
+        vscode.window.showInformationMessage('No additional chat windows open. Use "Oboto VS: New Chat Window" to create one.');
         return;
       }
       const items = panels.map(p => ({
@@ -233,7 +233,7 @@ export function registerCommands(
       chatPanelManager?.focusPanel(targetId);
       await orchestrator.submitToAgent(targetId, prompt);
     } else {
-      await vscode.commands.executeCommand('clodcode.chatPanel.focus');
+      await vscode.commands.executeCommand('obotovs.chatPanel.focus');
       await orchestrator.submitToAgent('foreground', prompt);
     }
   };

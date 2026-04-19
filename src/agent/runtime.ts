@@ -20,7 +20,7 @@ export async function getAgentRuntime(extensionPath: string): Promise<AgentRunti
   } catch (err) {
     // WASM loading is optional — features like slash commands
     // will be unavailable but the agent still works
-    console.warn('[clodcode] Failed to load as-agent WASM runtime:', err);
+    console.warn('[obotovs] Failed to load as-agent WASM runtime:', err);
     throw err;
   }
 }

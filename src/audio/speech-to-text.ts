@@ -120,7 +120,7 @@ export class SpeechToText {
       return;
     }
 
-    this.tempFile = path.join(os.tmpdir(), `clodcode-rec-${Date.now()}.wav`);
+    this.tempFile = path.join(os.tmpdir(), `obotovs-rec-${Date.now()}.wav`);
 
     const isFfmpeg = this.recorderBin!.includes('ffmpeg');
     let args: string[];

@@ -58,7 +58,7 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     name: 'vertex-anthropic',
     displayName: 'Vertex AI (Anthropic)',
     envKeyVar: ENV_KEY_MAP['vertex-anthropic'],
-    requiresApiKey: true,
+    requiresApiKey: false,
     isLocal: false,
   },
   openrouter: {

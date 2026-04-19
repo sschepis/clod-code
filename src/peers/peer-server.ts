@@ -107,7 +107,7 @@ export interface PeerEvent {
 /**
  * Small HTTP + SSE server that advertises this window's presence to peers
  * running in other VS Code windows on the same workspace. Binds to a random
- * free loopback port — the chosen port is stored in `.clodcode/windows/<id>.json`
+ * free loopback port — the chosen port is stored in `.obotovs/windows/<id>.json`
  * so peers can discover it.
  */
 export class PeerServer {

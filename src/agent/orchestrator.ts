@@ -16,7 +16,7 @@ import type { Session } from '@sschepis/as-agent';
 import type { AgentRuntime } from '@sschepis/as-agent';
 
 import type { SidebarProvider } from '../vscode-integration/sidebar-provider';
-import type { ClodcodeSettings } from '../config/settings';
+import type { ObotovsSettings } from '../config/settings';
 import type {
   WebviewToExtMessage, ExtToWebviewMessage, SessionEvent,
   ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo,
@@ -50,7 +50,6 @@ import type {
 
 import { logger } from '../shared/logger';
 import { MAX_ATTACHMENT_TEXT_LENGTH } from '../shared/constants';
-import { resolveApiKey } from '../config/provider-registry';
 import { SpeechToText } from '../audio/speech-to-text';
 
 const PLAN_MODE_PREAMBLE =
@@ -85,7 +84,7 @@ const PLAN_MODE_PREAMBLE =
   `### Context\n` +
   `Explain in 2-3 sentences why this change is being made and what outcome the user wants.\n\n` +
 
-  `### Files to Modify (in execution order)\n` +
+  `### Files to Modify\n` +
   `For EACH file, provide:\n` +
   `- **File path** and a one-line summary of why it's changing\n` +
   `- **Exact location**: the function/class/block being modified, with line numbers from your read\n` +
@@ -116,6 +115,14 @@ const PLAN_MODE_PREAMBLE =
   `### Verification\n` +
   `Numbered steps to test the change end-to-end — build commands, manual test steps, what to check.\n\n` +
 
+  `### Parallel Opportunities\n` +
+  `Identify which file changes or steps from the plan above are independent and could run in parallel ` +
+  `using agent/batch. Group them into parallel batches. Example:\n` +
+  `- Batch 1 (parallel): types.ts + constants.ts (no dependency between them)\n` +
+  `- Sequential: handler.ts (depends on types.ts)\n` +
+  `- Batch 2 (parallel): test-handler.test.ts + test-types.test.ts\n` +
+  `If the plan is simple enough that everything is sequential, say so and explain why.\n\n` +
+
   `## Rules\n` +
   `- Do NOT hand-wave. "Update the handler to support X" is not a plan — specify which handler, ` +
   `  what the current code looks like, and exactly what changes.\n` +
@@ -139,7 +146,7 @@ function truncateForMemory(s: string): string {
 export class Orchestrator {
   private sidebar: SidebarProvider;
   private sessionStore: SessionStore;
-  private settings: ClodcodeSettings;
+  private settings: ObotovsSettings;
   private extensionPath: string;
   private agentRuntime?: AgentRuntime;
 
@@ -170,7 +177,7 @@ export class Orchestrator {
   constructor(
     sidebar: SidebarProvider,
     sessionStore: SessionStore,
-    settings: ClodcodeSettings,
+    settings: ObotovsSettings,
     extensionPath: string,
     windowId: string,
     extensionContext?: vscode.ExtensionContext,
@@ -213,7 +220,7 @@ export class Orchestrator {
         this.submitToAgent(target, text);
         // Reveal the chat panel if submitting to foreground
         if (target === 'foreground') {
-          vscode.commands.executeCommand('clodcode.chatPanel.focus');
+          vscode.commands.executeCommand('obotovs.chatPanel.focus');
         }
       },
       onExecuteTool: async (tool, kwargs) => {
@@ -353,7 +360,7 @@ export class Orchestrator {
     }, 1000));
   }
 
-  /** Exposed for the `clodcode.openSurface` command. */
+  /** Exposed for the `obotovs.openSurface` command. */
   getSurfaceManager(): SurfaceManager { return this.surfaceManager; }
 
   /** Exposed for the `/peers` slash command. */
@@ -601,7 +608,7 @@ export class Orchestrator {
   }
 
   /** Recreate the foreground agent with new settings. */
-  async recreateAgent(newSettings?: ClodcodeSettings): Promise<void> {
+  async recreateAgent(newSettings?: ObotovsSettings): Promise<void> {
     if (newSettings) {
       this.settings = newSettings;
       this.manager.updateSettings(newSettings);
@@ -1168,10 +1175,13 @@ export class Orchestrator {
               const spawnOpts: any = { task, label };
               const lower = label.toLowerCase();
               if (lower === 'local') {
-                spawnOpts.model = {
-                  provider: this.settings.localProvider,
-                  name: this.settings.localModel
-                };
+                const triage = this.settings.routing?.triage;
+                if (triage) {
+                  spawnOpts.model = {
+                    provider: triage.providerId,
+                    name: triage.model || ''
+                  };
+                }
               } else if ((PROMPT_ROLES as readonly string[]).includes(lower)) {
                 spawnOpts.role = lower;
               }
@@ -1212,10 +1222,10 @@ export class Orchestrator {
               task: inputText,
               label: isPlan ? 'Planner' : 'Secondary Query (Local)',
               role: isPlan ? 'planner' : undefined,
-              model: isPlan ? undefined : {
-                provider: this.settings.localProvider,
-                name: this.settings.localModel
-              }
+              model: isPlan ? undefined : (() => {
+                const triage = this.settings.routing?.triage;
+                return triage ? { provider: triage.providerId, name: triage.model || '' } : undefined;
+              })()
             });
           } else {
             await host.submit(inputText, msg.attachments);
@@ -1332,18 +1342,18 @@ export class Orchestrator {
 
       case 'request_provider_models': {
         const { getProviderModels } = await import('../config/model-listing');
-        const providerList = await getProviderModels(this.settings.providerKeys);
+        const providerList = await getProviderModels({});
         this.bridge.post({ type: 'provider_models', providers: providerList });
         break;
       }
 
       case 'change_model': {
-        const switchKey = resolveApiKey(msg.provider, undefined, this.settings.providerKeys);
-        const newSettings: ClodcodeSettings = {
+        const newSettings: ObotovsSettings = {
           ...this.settings,
-          remoteProvider: msg.provider,
-          remoteModel: msg.model,
-          remoteApiKey: switchKey,
+          routing: {
+            ...this.settings.routing,
+            executor: { providerId: msg.provider, model: msg.model },
+          },
         };
         this.settings = newSettings;
         const changeTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
@@ -1459,7 +1469,7 @@ export class Orchestrator {
   private installObjectsWatcher(): void {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) return;
-    const pattern = new vscode.RelativePattern(folders[0], '.clodcode/**/*');
+    const pattern = new vscode.RelativePattern(folders[0], '.obotovs/**/*');
     try {
       this.objectsWatcher = vscode.workspace.createFileSystemWatcher(pattern);
       const trigger = () => this.scheduleObjectsBroadcast();
@@ -1486,7 +1496,7 @@ export class Orchestrator {
 
     const surfaces: SurfaceInfo[] = this.surfaceManager.listSurfaces().map((name) => ({
       name,
-      filePath: root ? path.join(root, '.clodcode', 'surfaces', `${name}.html`) : '',
+      filePath: root ? path.join(root, '.obotovs', 'surfaces', `${name}.html`) : '',
     }));
 
     const routes: RouteInfo[] = this.routeManager.routes().map((r) => {
@@ -1607,7 +1617,7 @@ export class Orchestrator {
   private async handleSurfaceAction(action: ObjectActionKind, name: string): Promise<void> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return;
-    const filePath = path.join(root, '.clodcode', 'surfaces', `${name}.html`);
+    const filePath = path.join(root, '.obotovs', 'surfaces', `${name}.html`);
     if (action === 'open') {
       const res = this.surfaceManager.openPanel(name, false);
       if (!res.ok && res.reason) vscode.window.showErrorMessage(res.reason);
@@ -1632,7 +1642,7 @@ export class Orchestrator {
 
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return;
-    const filePath = path.join(root, '.clodcode', 'surfaces', `${error.name}.html`);
+    const filePath = path.join(root, '.obotovs', 'surfaces', `${error.name}.html`);
 
     let source: string;
     try {
@@ -1829,7 +1839,7 @@ export class Orchestrator {
     );
 
     registry.registerCommand(
-      { name: 'peers', summary: 'List other Clodcode windows running on this workspace', argumentHint: '', resumeSupported: false },
+      { name: 'peers', summary: 'List other Oboto VS windows running on this workspace', argumentHint: '', resumeSupported: false },
       () => {
         const peers = this.peerManager.listPeers();
         if (peers.length === 0) {

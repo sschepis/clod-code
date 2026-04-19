@@ -3,7 +3,7 @@ import type { ExtToWebviewMessage, WebviewToExtMessage } from '../shared/message
 import type { WebviewTarget } from '../agent/webview-bridge';
 
 export class ChatPanel implements WebviewTarget {
-  static readonly viewType = 'clodcode.chatWindow';
+  static readonly viewType = 'obotovs.chatWindow';
 
   private readonly panel: vscode.WebviewPanel;
   private _messageHandler?: (msg: WebviewToExtMessage) => void;
@@ -120,7 +120,7 @@ export class ChatPanel implements WebviewTarget {
 </head>
 <body>
   <div id="root"></div>
-  <script nonce="${nonce}">window.__CLODCODE_PANEL_AGENT_ID__ = ${JSON.stringify(this.panelId)};</script>
+  <script nonce="${nonce}">window.__OBOTOVS_PANEL_AGENT_ID__ = ${JSON.stringify(this.panelId)};</script>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
 </html>`;

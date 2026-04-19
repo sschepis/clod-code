@@ -1,6 +1,6 @@
 {
-  "name": "clodcode",
-  "displayName": "Clod Code",
+  "name": "obotovs",
+  "displayName": "Oboto VS",
   "description": "Multi-LLM AI coding assistant for VS Code",
   "version": "0.1.0",
   "publisher": "sschepis",
@@ -25,321 +25,324 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "clodcode",
-          "title": "Clod Code",
+          "id": "obotovs",
+          "title": "Oboto VS",
           "icon": "assets/sidebar-icon.svg"
         }
       ]
     },
     "views": {
-      "clodcode": [
+      "obotovs": [
         {
-          "id": "clodcode.explorer",
+          "id": "obotovs.explorer",
           "name": "Explorer"
         },
         {
           "type": "webview",
-          "id": "clodcode.chatPanel",
+          "id": "obotovs.chatPanel",
           "name": "Chat"
         }
       ]
     },
     "commands": [
       {
-        "command": "clodcode.newSession",
-        "title": "Clod Code: New Session"
+        "command": "obotovs.newSession",
+        "title": "Oboto: New Session"
       },
       {
-        "command": "clodcode.clearSession",
-        "title": "Clod Code: Clear Session"
+        "command": "obotovs.clearSession",
+        "title": "Oboto: Clear Session"
       },
       {
-        "command": "clodcode.switchModel",
-        "title": "Clod Code: Switch Model"
+        "command": "obotovs.switchModel",
+        "title": "Oboto: Switch Model"
       },
       {
-        "command": "clodcode.askAboutSelection",
-        "title": "Ask Clod Code About Selection"
+        "command": "obotovs.askAboutSelection",
+        "title": "Ask Oboto VS About Selection"
       },
       {
-        "command": "clodcode.focusChat",
-        "title": "Clod Code: Focus Chat",
+        "command": "obotovs.focusChat",
+        "title": "Oboto: Focus Chat",
         "icon": {
           "light": "assets/icon.png",
           "dark": "assets/icon.png"
         }
       },
       {
-        "command": "clodcode.openSettings",
-        "title": "Clod Code: Open Settings",
+        "command": "obotovs.openSettings",
+        "title": "Oboto: Open Settings",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "clodcode.showLogs",
-        "title": "Clod Code: Show Logs",
+        "command": "obotovs.showLogs",
+        "title": "Oboto: Show Logs",
         "icon": "$(output)"
       },
       {
-        "command": "clodcode.openSurface",
-        "title": "Clod Code: Open Surface"
+        "command": "obotovs.openSurface",
+        "title": "Oboto: Open Surface"
       },
       {
-        "command": "clodcode.newChat",
-        "title": "Clod Code: New Chat Window"
+        "command": "obotovs.newChat",
+        "title": "Oboto: New Chat Window"
       },
       {
-        "command": "clodcode.listChats",
-        "title": "Clod Code: List Chat Windows"
+        "command": "obotovs.listChats",
+        "title": "Oboto: List Chat Windows"
       },
       {
-        "command": "clodcode.explainCode",
-        "title": "Clod Code: Explain Code"
+        "command": "obotovs.explainCode",
+        "title": "Oboto: Explain Code"
       },
       {
-        "command": "clodcode.refactorCode",
-        "title": "Clod Code: Refactor Code"
+        "command": "obotovs.refactorCode",
+        "title": "Oboto: Refactor Code"
       },
       {
-        "command": "clodcode.writeTests",
-        "title": "Clod Code: Write Tests"
+        "command": "obotovs.writeTests",
+        "title": "Oboto: Write Tests"
       },
       {
-        "command": "clodcode.refreshExplorer",
+        "command": "obotovs.refreshExplorer",
         "title": "Refresh Explorer",
         "icon": "$(refresh)"
       },
       {
-        "command": "clodcode.explorer.openFile",
+        "command": "obotovs.explorer.openFile",
         "title": "Open"
       },
       {
-        "command": "clodcode.explorer.deleteFile",
+        "command": "obotovs.explorer.deleteFile",
         "title": "Delete"
       },
       {
-        "command": "clodcode.explorer.revealInFinder",
+        "command": "obotovs.explorer.revealInFinder",
         "title": "Reveal in Finder"
       },
       {
-        "command": "clodcode.explorer.copyPath",
+        "command": "obotovs.explorer.copyPath",
         "title": "Copy Path"
       },
       {
-        "command": "clodcode.explorer.copyRelativePath",
+        "command": "obotovs.explorer.copyRelativePath",
         "title": "Copy Relative Path"
       },
       {
-        "command": "clodcode.explorer.cancelTask",
+        "command": "obotovs.explorer.cancelTask",
         "title": "Cancel",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "clodcode.explorer.copyTaskResult",
+        "command": "obotovs.explorer.copyTaskResult",
         "title": "Copy Result"
       },
       {
-        "command": "clodcode.explorer.rerunTask",
+        "command": "obotovs.explorer.rerunTask",
         "title": "Re-run Task"
       },
       {
-        "command": "clodcode.explorer.focusTask",
+        "command": "obotovs.explorer.focusTask",
         "title": "Focus in Chat"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "clodcode.focusChat",
+          "command": "obotovs.focusChat",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
-          "command": "clodcode.askAboutSelection",
+          "command": "obotovs.askAboutSelection",
           "when": "editorHasSelection",
-          "group": "clodcode@1"
+          "group": "obotovs@1"
         },
         {
-          "command": "clodcode.explainCode",
+          "command": "obotovs.explainCode",
           "when": "editorHasSelection",
-          "group": "clodcode@1"
+          "group": "obotovs@1"
         },
         {
-          "command": "clodcode.refactorCode",
+          "command": "obotovs.refactorCode",
           "when": "editorHasSelection",
-          "group": "clodcode@1"
+          "group": "obotovs@1"
         },
         {
-          "command": "clodcode.writeTests",
+          "command": "obotovs.writeTests",
           "when": "editorHasSelection",
-          "group": "clodcode@1"
+          "group": "obotovs@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "clodcode.explorer.openFile",
-          "when": "view == clodcode.explorer && viewItem =~ /File$/",
+          "command": "obotovs.explorer.openFile",
+          "when": "view == obotovs.explorer && viewItem =~ /File$/",
           "group": "navigation@1"
         },
         {
-          "command": "clodcode.explorer.revealInFinder",
-          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "command": "obotovs.explorer.revealInFinder",
+          "when": "view == obotovs.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
           "group": "navigation@2"
         },
         {
-          "command": "clodcode.explorer.copyPath",
-          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "command": "obotovs.explorer.copyPath",
+          "when": "view == obotovs.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
           "group": "copy@1"
         },
         {
-          "command": "clodcode.explorer.copyRelativePath",
-          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "command": "obotovs.explorer.copyRelativePath",
+          "when": "view == obotovs.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
           "group": "copy@2"
         },
         {
-          "command": "clodcode.explorer.deleteFile",
-          "when": "view == clodcode.explorer && viewItem =~ /surfaceFile|routeFile|routeDir|skillFile|conversationFile|workspaceFile|directory/",
+          "command": "obotovs.explorer.deleteFile",
+          "when": "view == obotovs.explorer && viewItem =~ /surfaceFile|routeFile|routeDir|skillFile|conversationFile|workspaceFile|directory/",
           "group": "danger@1"
         },
         {
-          "command": "clodcode.explorer.focusTask",
-          "when": "view == clodcode.explorer && viewItem =~ /^task/",
+          "command": "obotovs.explorer.focusTask",
+          "when": "view == obotovs.explorer && viewItem =~ /^task/",
           "group": "navigation@1"
         },
         {
-          "command": "clodcode.explorer.cancelTask",
-          "when": "view == clodcode.explorer && viewItem == taskRunning",
+          "command": "obotovs.explorer.cancelTask",
+          "when": "view == obotovs.explorer && viewItem == taskRunning",
           "group": "navigation@2"
         },
         {
-          "command": "clodcode.explorer.copyTaskResult",
-          "when": "view == clodcode.explorer && viewItem =~ /taskCompleted|taskFailed/",
+          "command": "obotovs.explorer.copyTaskResult",
+          "when": "view == obotovs.explorer && viewItem =~ /taskCompleted|taskFailed/",
           "group": "copy@1"
         },
         {
-          "command": "clodcode.explorer.rerunTask",
-          "when": "view == clodcode.explorer && viewItem =~ /taskCompleted|taskFailed/",
+          "command": "obotovs.explorer.rerunTask",
+          "when": "view == obotovs.explorer && viewItem =~ /taskCompleted|taskFailed/",
           "group": "inline@1"
         }
       ],
       "view/title": [
         {
-          "command": "clodcode.openSettings",
-          "when": "view == clodcode.chatPanel",
+          "command": "obotovs.openSettings",
+          "when": "view == obotovs.chatPanel",
           "group": "navigation@1"
         },
         {
-          "command": "clodcode.showLogs",
-          "when": "view == clodcode.chatPanel",
+          "command": "obotovs.showLogs",
+          "when": "view == obotovs.chatPanel",
           "group": "navigation@2"
         },
         {
-          "command": "clodcode.clearSession",
-          "when": "view == clodcode.chatPanel",
+          "command": "obotovs.clearSession",
+          "when": "view == obotovs.chatPanel",
           "group": "navigation@3"
         },
         {
-          "command": "clodcode.refreshExplorer",
-          "when": "view == clodcode.explorer",
+          "command": "obotovs.refreshExplorer",
+          "when": "view == obotovs.explorer",
           "group": "navigation"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "clodcode.focusChat",
+        "command": "obotovs.focusChat",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l"
       },
       {
-        "command": "clodcode.newChat",
+        "command": "obotovs.newChat",
         "key": "ctrl+shift+n",
         "mac": "cmd+shift+n",
-        "when": "view == clodcode.chatPanel"
+        "when": "view == obotovs.chatPanel"
       },
       {
-        "command": "clodcode.explorer.deleteFile",
+        "command": "obotovs.explorer.deleteFile",
         "key": "delete",
         "mac": "cmd+backspace",
-        "when": "focusedView == clodcode.explorer && listFocus"
+        "when": "focusedView == obotovs.explorer && listFocus"
       }
     ],
     "configuration": {
-      "title": "Clodcode",
+      "title": "Oboto VS",
       "properties": {
-        "clodcode.localProvider": {
-          "type": "string",
-          "enum": [
-            "ollama",
-            "lmstudio",
-            "openai",
-            "anthropic",
-            "gemini",
-            "vertex-gemini",
-            "vertex-anthropic",
-            "openrouter",
-            "deepseek",
-            "azure-openai"
-          ],
-          "default": "ollama",
-          "description": "LLM provider for the local (triage) model"
-        },
-        "clodcode.localModel": {
-          "type": "string",
-          "default": "llama3:8b",
-          "description": "Model name for the local provider"
-        },
-        "clodcode.localBaseUrl": {
-          "type": "string",
-          "default": "http://localhost:11434",
-          "description": "Base URL for the local provider"
-        },
-        "clodcode.localApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for the local provider when it's a commercial LLM (prefer env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_API_KEY, etc.)"
-        },
-        "clodcode.remoteProvider": {
-          "type": "string",
-          "enum": [
-            "anthropic",
-            "openai",
-            "gemini",
-            "vertex-gemini",
-            "vertex-anthropic",
-            "openrouter",
-            "deepseek",
-            "azure-openai",
-            "ollama",
-            "lmstudio"
-          ],
-          "default": "anthropic",
-          "description": "LLM provider for the remote (powerful) model"
-        },
-        "clodcode.remoteModel": {
-          "type": "string",
-          "default": "claude-sonnet-4-20250514",
-          "description": "Model name for the remote provider"
-        },
-        "clodcode.remoteApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for the remote provider (prefer env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
-        },
-        "clodcode.remoteBaseUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Base URL / endpoint for the remote provider. Required for Azure OpenAI (e.g. https://myresource.openai.azure.com). Optional for other providers."
-        },
-        "clodcode.providerKeys": {
+        "obotovs.providers": {
           "type": "object",
           "default": {},
-          "description": "API keys for multiple providers. Keys are provider names (e.g. 'anthropic', 'openai'), values are API key strings. Enables quick model switching from the chat header.",
+          "markdownDescription": "Configured LLM providers. Each key is a unique provider ID, and the value describes how to connect.\n\n**Example:**\n```json\n{\n  \"my-anthropic\": {\n    \"type\": \"anthropic\",\n    \"label\": \"Anthropic\",\n    \"defaultModel\": \"claude-sonnet-4-20250514\"\n  },\n  \"my-openai\": {\n    \"type\": \"openai\",\n    \"label\": \"OpenAI\",\n    \"defaultModel\": \"gpt-4o\"\n  }\n}\n```\nAPI keys can be set here or via environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.).\n\nThe managed **Oboto Local** provider (Ollama) is always available without configuration.",
           "additionalProperties": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["ollama", "lmstudio", "openai", "anthropic", "gemini", "vertex-gemini", "vertex-anthropic", "openrouter", "deepseek", "azure-openai"],
+                "description": "Provider type"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display name (auto-generated if omitted)"
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "API key (prefer env vars)"
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "Base URL (only needed for self-hosted / Azure)"
+              },
+              "defaultModel": {
+                "type": "string",
+                "description": "Default model name"
+              }
+            },
+            "required": ["type"]
           }
         },
-        "clodcode.permissionMode": {
+        "obotovs.routing": {
+          "type": "object",
+          "default": {
+            "triage": { "providerId": "oboto" },
+            "executor": { "providerId": "oboto" }
+          },
+          "markdownDescription": "Route task roles to specific providers and models.\n\n**Roles:**\n- `triage` — quick classification (fast, cheap model)\n- `executor` — main task execution (powerful model)\n- `planner` — planning and architecture (falls back to executor if unset)\n- `summarizer` — compaction and summarization (falls back to executor if unset)\n\n**Example:**\n```json\n{\n  \"triage\": { \"providerId\": \"oboto\" },\n  \"executor\": { \"providerId\": \"my-anthropic\", \"model\": \"claude-sonnet-4-20250514\" }\n}\n```\nUse `\"oboto\"` for the managed local Ollama provider, or a key from your `providers` map.",
+          "properties": {
+            "triage": {
+              "type": "object",
+              "properties": {
+                "providerId": { "type": "string", "description": "Provider ID from providers map, or \"oboto\"" },
+                "model": { "type": "string", "description": "Model name (falls back to provider's defaultModel)" }
+              },
+              "required": ["providerId"]
+            },
+            "executor": {
+              "type": "object",
+              "properties": {
+                "providerId": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["providerId"]
+            },
+            "planner": {
+              "type": "object",
+              "properties": {
+                "providerId": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["providerId"]
+            },
+            "summarizer": {
+              "type": "object",
+              "properties": {
+                "providerId": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["providerId"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "obotovs.permissionMode": {
           "type": "string",
           "enum": [
             "readonly",
@@ -350,138 +353,78 @@
           "default": "prompt",
           "description": "Permission mode for tool execution"
         },
-        "clodcode.maxIterations": {
+        "obotovs.maxIterations": {
           "type": "number",
           "default": 25,
           "description": "Maximum tool-use iterations per turn"
         },
-        "clodcode.maxContextTokens": {
+        "obotovs.maxContextTokens": {
           "type": "number",
           "default": 128000,
           "description": "Maximum context window tokens"
         },
-        "clodcode.triageEnabled": {
+        "obotovs.triageEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable dual-LLM triage (local for simple queries, remote for complex tasks)"
         },
-        "clodcode.autoCompact": {
+        "obotovs.autoCompact": {
           "type": "boolean",
           "default": true,
           "description": "Automatically compact sessions when token limit is approached"
         },
-        "clodcode.autoCompactThreshold": {
+        "obotovs.autoCompactThreshold": {
           "type": "number",
           "default": 150000,
           "description": "Token count threshold for auto-compaction"
         },
-        "clodcode.instructionFile": {
+        "obotovs.instructionFile": {
           "type": "string",
           "default": "CLAUDE.md",
           "description": "Name of the project instruction file"
         },
-        "clodcode.maxConcurrentAgents": {
+        "obotovs.maxConcurrentAgents": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "maximum": 50,
           "description": "Maximum background agents that may run at once"
         },
-        "clodcode.defaultAgentBudgetUsd": {
+        "obotovs.defaultAgentBudgetUsd": {
           "type": "number",
           "default": 0.5,
           "minimum": 0,
           "description": "Default USD budget ceiling for spawned background agents"
         },
-        "clodcode.agentTimeoutMs": {
+        "obotovs.agentTimeoutMs": {
           "type": "number",
           "default": 300000,
           "minimum": 1000,
           "description": "Default timeout (ms) for spawned background agents"
         },
-        "clodcode.maxAgentNestingDepth": {
+        "obotovs.maxAgentNestingDepth": {
           "type": "number",
           "default": 2,
           "minimum": 0,
           "maximum": 5,
           "description": "Maximum nesting depth for recursive agent spawning (0 = no sub-agents from background agents)"
         },
-        "clodcode.surfacesAutoOpen": {
+        "obotovs.surfacesAutoOpen": {
           "type": "boolean",
           "default": true,
-          "description": "Allow the AI to open surface panels on its own after creating or updating them. When off, open surfaces manually via 'Clodcode: Open Surface'."
+          "description": "Allow the AI to open surface panels on its own after creating or updating them. When off, open surfaces manually via 'Oboto VS: Open Surface'."
         },
-        "clodcode.uiControlEnabled": {
+        "obotovs.uiControlEnabled": {
           "type": "boolean",
           "default": false,
           "description": "Allow the AI to capture screenshots and drive the mouse/keyboard via nut.js. On macOS you must also grant VS Code Screen Recording and Accessibility permissions in System Settings."
         },
-        "clodcode.peerDispatchEnabled": {
+        "obotovs.peerDispatchEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Allow other Clodcode windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
+          "description": "Allow other Oboto VS windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
         },
-        "clodcode.promptRouting": {
-          "type": "object",
-          "default": {
-            "orchestrator": { "provider": "gemini", "model": "gemini-3-flash-preview" },
-            "planner": { "provider": "gemini", "model": "gemini-3.1-pro-preview" },
-            "actor": { "provider": "gemini", "model": "gemini-3-flash-preview" },
-            "summarizer": { "provider": "local", "model": "" }
-          },
-          "markdownDescription": "Route different task roles to specific providers and models. Each role maps to `{ \"provider\": \"...\", \"model\": \"...\" }`.\n\n**Roles:**\n- `orchestrator` — triage/routing decisions (fast, cheap model)\n- `planner` — planning and architecture (strong reasoning model)\n- `actor` — execution and tool use (main workhorse model)\n- `summarizer` — compaction and summarization\n\n**Example:**\n```json\n{\n  \"orchestrator\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" },\n  \"planner\": { \"provider\": \"anthropic\", \"model\": \"claude-sonnet-4-20250514\" },\n  \"actor\": { \"provider\": \"openai\", \"model\": \"gpt-4o\" }\n}\n```\nUnconfigured roles fall back to the default local/remote provider settings.",
-          "properties": {
-            "orchestrator": {
-              "type": "object",
-              "properties": {
-                "provider": { "type": "string", "description": "Provider name (e.g. anthropic, openai, gemini)" },
-                "model": { "type": "string", "description": "Model name for this provider" }
-              },
-              "required": ["provider", "model"],
-              "description": "Triage/routing decisions — a fast, cheap model works well here"
-            },
-            "planner": {
-              "type": "object",
-              "properties": {
-                "provider": { "type": "string" },
-                "model": { "type": "string" }
-              },
-              "required": ["provider", "model"],
-              "description": "Planning and architecture — use a strong reasoning model"
-            },
-            "actor": {
-              "type": "object",
-              "properties": {
-                "provider": { "type": "string" },
-                "model": { "type": "string" }
-              },
-              "required": ["provider", "model"],
-              "description": "Execution and tool use — the main workhorse model"
-            },
-            "summarizer": {
-              "type": "object",
-              "properties": {
-                "provider": { "type": "string" },
-                "model": { "type": "string" }
-              },
-              "required": ["provider", "model"],
-              "description": "Compaction and summarization tasks. Set provider to \"local\" to use the configured local LLM (Ollama/LM Studio)."
-            }
-          },
-          "additionalProperties": false
-        },
-        "clodcode.roundRobinEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Rotate the remote provider across all configured providers on each request. Requires roundRobinModels to map each provider to a model name."
-        },
-        "clodcode.roundRobinModels": {
-          "type": "object",
-          "default": {},
-          "additionalProperties": { "type": "string" },
-          "description": "Per-provider model names for round-robin rotation. Example: { \"anthropic\": \"claude-sonnet-4-20250514\", \"openai\": \"gpt-4o\", \"gemini\": \"gemini-2.0-flash\" }. Only providers listed here (with valid API keys) participate in rotation."
-        },
-        "clodcode.shell": {
+        "obotovs.shell": {
           "type": "string",
           "default": "",
           "enum": ["", "/bin/zsh", "/bin/bash", "/bin/sh"],
@@ -497,30 +440,30 @@
     },
     "walkthroughs": [
       {
-        "id": "clodcode.welcome",
-        "title": "Welcome to Clod Code",
+        "id": "obotovs.welcome",
+        "title": "Welcome to Oboto VS",
         "description": "Get started with your multi-LLM AI coding assistant.",
         "steps": [
           {
-            "id": "clodcode.step1",
+            "id": "obotovs.step1",
             "title": "Start a Chat",
-            "description": "Open the Clod Code chat panel from the Activity Bar to start talking to your assistant. \n[Open Chat](command:clodcode.focusChat)",
+            "description": "Open the Oboto VS chat panel from the Activity Bar to start talking to your assistant. \n[Open Chat](command:obotovs.focusChat)",
             "media": {
               "markdown": "assets/walkthrough-chat.md"
             }
           },
           {
-            "id": "clodcode.step2",
+            "id": "obotovs.step2",
             "title": "Configure Your Models",
-            "description": "Clod Code supports OpenAI, Anthropic, Gemini, and local models. Set your API keys and default provider in the settings.\n[Open Settings](command:clodcode.openSettings)",
+            "description": "Oboto VS supports OpenAI, Anthropic, Gemini, and local models. Set your API keys and default provider in the settings.\n[Open Settings](command:obotovs.openSettings)",
             "media": {
               "markdown": "assets/walkthrough-models.md"
             }
           },
           {
-            "id": "clodcode.step3",
+            "id": "obotovs.step3",
             "title": "Surfaces & Routes",
-            "description": "Clod Code can generate interactive Web UIs (Surfaces) and local API endpoints (Routes) directly inside your workspace.",
+            "description": "Oboto VS can generate interactive Web UIs (Surfaces) and local API endpoints (Routes) directly inside your workspace.",
             "media": {
               "markdown": "assets/walkthrough-surfaces.md"
             }
@@ -578,7 +521,7 @@
     "coding assistant"
   ],
   "bugs": {
-    "url": "https://github.com/sschepis/clodcode/issues"
+    "url": "https://github.com/sschepis/obotovs/issues"
   },
-  "homepage": "https://github.com/sschepis/clodcode#readme"
+  "homepage": "https://github.com/sschepis/obotovs#readme"
 }

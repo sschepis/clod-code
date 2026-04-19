@@ -1,7 +1,7 @@
 /**
  * SkillManager — workspace-scoped registry of agent skills.
  *
- * A "skill" is a markdown file under `.clodcode/skills/**\/*.md` with
+ * A "skill" is a markdown file under `.obotovs/skills/**\/*.md` with
  * optional YAML frontmatter:
  *
  *   ---
@@ -16,7 +16,7 @@
  *   1. ...
  *
  * The manager:
- *   - scans `.clodcode/skills` recursively on construction and file changes
+ *   - scans `.obotovs/skills` recursively on construction and file changes
  *   - parses frontmatter (simple key: value pairs; no nested YAML)
  *   - exposes `list()` for tool listing, `get(name)` for full body retrieval
  *   - exposes `systemPromptSnippet()` so the agent knows what skills exist
@@ -60,7 +60,7 @@ function workspaceRoot(): string | null {
 }
 
 export function skillsDir(root: string): string {
-  return path.join(root, '.clodcode', 'skills');
+  return path.join(root, '.obotovs', 'skills');
 }
 
 export class SkillManager {
@@ -133,14 +133,14 @@ export class SkillManager {
   // ── Scanning / parsing ──────────────────────────────────────────────
 
   /**
-   * Re-scan `.clodcode/skills` from disk. Called on construction and
+   * Re-scan `.obotovs/skills` from disk. Called on construction and
    * whenever the watcher fires.
    */
   reload(): void {
     this.skills.clear();
 
     // 1. Load global skills
-    const globalDir = path.join(os.homedir(), '.clodcode', 'skills');
+    const globalDir = path.join(os.homedir(), '.obotovs', 'skills');
     this.loadFromDir(globalDir);
 
     // 2. Load workspace skills (these can override global skills with the same name)
@@ -215,7 +215,7 @@ export class SkillManager {
 
     if (vscode.workspace.workspaceFolders?.length) {
       this.watcher = vscode.workspace.createFileSystemWatcher(
-        '**/.clodcode/skills/**/*.md',
+        '**/.obotovs/skills/**/*.md',
       );
       this.watcher.onDidCreate(schedule);
       this.watcher.onDidChange(schedule);
@@ -223,7 +223,7 @@ export class SkillManager {
     }
 
     const globalPattern = new vscode.RelativePattern(
-      path.join(os.homedir(), '.clodcode', 'skills'),
+      path.join(os.homedir(), '.obotovs', 'skills'),
       '**/*.md'
     );
     this.globalWatcher = vscode.workspace.createFileSystemWatcher(globalPattern);

@@ -27,7 +27,7 @@ function loadNut(): Promise<any> {
 
 function gateCheck(): string | null {
   if (!getSettings().uiControlEnabled) {
-    return `[ERROR] UI control is disabled. Enable "Clodcode: UI Control Enabled" in Clodcode Settings to allow the AI to capture the screen and drive mouse/keyboard.`;
+    return `[ERROR] UI control is disabled. Enable "Oboto VS: UI Control Enabled" in Oboto VS Settings to allow the AI to capture the screen and drive mouse/keyboard.`;
   }
   return null;
 }
@@ -41,7 +41,7 @@ function workspaceRoot(): string | null {
 function screenshotDir(): string {
   const root = workspaceRoot();
   const base = root ?? process.cwd();
-  return path.join(base, '.clodcode', 'screenshots');
+  return path.join(base, '.obotovs', 'screenshots');
 }
 
 function timestamp(): string {

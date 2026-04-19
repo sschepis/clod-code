@@ -1,7 +1,7 @@
-# Chat with Clod Code
+# Chat with Oboto VS
 
-Clod Code is a powerful AI assistant that lives right inside your editor. 
+Oboto VS is a powerful AI assistant that lives right inside your editor. 
 
-- **Ask Questions:** Highlight code and ask Clod Code to explain it.
-- **Run Tools:** Clod Code can read files, search your workspace, run shell commands, and even commit code for you.
-- **Memory:** Clod Code remembers important details about your project over time.
+- **Ask Questions:** Highlight code and ask Oboto VS to explain it.
+- **Run Tools:** Oboto VS can read files, search your workspace, run shell commands, and even commit code for you.
+- **Memory:** Oboto VS remembers important details about your project over time.

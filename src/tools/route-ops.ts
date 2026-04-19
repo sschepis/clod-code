@@ -19,7 +19,7 @@ function workspaceRoot(): string | null {
 function routesRoot(): string | null {
   const root = workspaceRoot();
   if (!root) return null;
-  return path.join(root, '.clodcode', 'routes');
+  return path.join(root, '.obotovs', 'routes');
 }
 
 /** Normalize `"/users/[id]/"` → `"users/[id]"`. */
@@ -58,7 +58,7 @@ export function createRouteListHandler(deps: RouteToolDeps) {
     const root = routesRoot();
     if (!root || !fs.existsSync(root)) return 'No routes directory yet.';
     const entries = scanRoutes(workspaceRoot()!);
-    if (entries.length === 0) return 'No routes found under .clodcode/routes/.';
+    if (entries.length === 0) return 'No routes found under .obotovs/routes/.';
     return entries.map((e) => `${e.urlPath}  (${e.file})`).join('\n');
   };
 }

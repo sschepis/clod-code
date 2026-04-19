@@ -27,9 +27,9 @@ Thumbs.db
 .env.test
 .env.production
 
-# Clodcode Workspace Data
+# Oboto VS Workspace Data
 # Uncomment the line below if you want to ignore local surfaces, routes, and skills generated in testing
-# .clodcode/
+# .obotovs/
 
 # Logs
 logs
@@ -38,4 +38,4 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-.clodcode/
+.obotovs/

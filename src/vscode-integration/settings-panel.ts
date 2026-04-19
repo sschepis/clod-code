@@ -5,17 +5,16 @@ import type {
   SettingsExtToWebview, SettingsWebviewToExt,
   SettingsState, ProviderOption,
 } from '../shared/message-types';
-import { PROVIDERS, resolveApiKey, normalizeBaseUrl } from '../config/provider-registry';
+import { PROVIDERS, getProviderMeta, normalizeBaseUrl } from '../config/provider-registry';
+import { listModelsForProvider, listOllamaModels, isOllamaRunning, pullOllamaModel } from '../config/model-listing';
+import { MANAGED_PROVIDER_ID, getManagedProviderStatus, ensureManagedProvider } from '../config/managed-provider';
+import { ENV_KEY_MAP } from '../shared/constants';
 import { getSettings } from '../config/settings';
 import { logger } from '../shared/logger';
 import { getErrorMessage } from '../shared/errors';
 
-/**
- * A WebviewPanel that lets the user configure all Clodcode settings
- * via a friendly form UI instead of editing settings.json by hand.
- */
 export class SettingsPanel {
-  public static readonly viewType = 'clodcode.settingsPanel';
+  public static readonly viewType = 'obotovs.settingsPanel';
   private static currentPanel: SettingsPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
@@ -31,7 +30,7 @@ export class SettingsPanel {
 
     const panel = vscode.window.createWebviewPanel(
       SettingsPanel.viewType,
-      'Clodcode Settings',
+      'Oboto Settings',
       column ?? vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -70,7 +69,11 @@ export class SettingsPanel {
         break;
 
       case 'test_connection':
-        await this.testConnection(msg.target, msg.overrides);
+        await this.testConnection(msg.providerId, msg.model);
+        break;
+
+      case 'pull_model':
+        await this.pullModel(msg.model);
         break;
 
       case 'reset_to_defaults':
@@ -83,29 +86,93 @@ export class SettingsPanel {
     }
   }
 
-  private sync(): void {
+  private async sync(): Promise<void> {
     const settings = getSettings();
-    const providers: ProviderOption[] = Object.values(PROVIDERS).map(p => ({
-      name: p.name,
-      displayName: p.displayName,
-      isLocal: p.isLocal,
-      requiresApiKey: p.requiresApiKey,
-      envKeyVar: p.envKeyVar,
-      envKeySet: !!(p.envKeyVar && process.env[p.envKeyVar]),
-      defaultBaseUrl: p.defaultBaseUrl,
-    }));
-
+    const providers = await this.buildProviderList(settings);
     this.post({ type: 'sync', settings, providers });
+
+    const managed = providers.find(p => p.managed);
+    if (managed && !managed.serviceRunning) {
+      this.autoProvisionManaged();
+    }
+  }
+
+  private autoProvisioningInProgress = false;
+
+  private async autoProvisionManaged(): Promise<void> {
+    if (this.autoProvisioningInProgress) return;
+    this.autoProvisioningInProgress = true;
+    try {
+      await ensureManagedProvider();
+    } catch (err) {
+      logger.warn('Auto-provision of managed provider failed', err);
+    } finally {
+      this.autoProvisioningInProgress = false;
+      const settings = getSettings();
+      const providers = await this.buildProviderList(settings);
+      this.post({ type: 'sync', settings, providers });
+    }
+  }
+
+  private async buildProviderList(settings: typeof import('../config/settings').getSettings extends () => infer R ? R : never): Promise<ProviderOption[]> {
+    const result: ProviderOption[] = [];
+
+    // 1. Managed Oboto provider (always first)
+    const managedStatus = await getManagedProviderStatus();
+    result.push({
+      id: MANAGED_PROVIDER_ID,
+      type: 'ollama',
+      displayName: 'Oboto Local',
+      isLocal: true,
+      requiresApiKey: false,
+      envKeyVar: '',
+      envKeySet: false,
+      managed: true,
+      models: managedStatus.availableModels,
+      serviceRunning: managedStatus.ollamaRunning,
+    });
+
+    // 2. User-configured providers (fetch models from each API in parallel)
+    const providerEntries = Object.entries(settings.providers);
+    const modelFetches = providerEntries.map(async ([, config]) => {
+      const meta = getProviderMeta(config.type);
+      const apiKey = config.apiKey?.trim()
+        || (ENV_KEY_MAP[config.type] ? process.env[ENV_KEY_MAP[config.type]] : '')
+        || '';
+      try {
+        return await listModelsForProvider(config.type, apiKey, config.baseUrl || meta?.defaultBaseUrl);
+      } catch (err) {
+        logger.debug(`Model list fetch failed for ${config.type}`, err);
+        return [];
+      }
+    });
+    const allModels = await Promise.all(modelFetches);
+
+    for (let i = 0; i < providerEntries.length; i++) {
+      const [id, config] = providerEntries[i];
+      const meta = getProviderMeta(config.type);
+      const models = allModels[i];
+
+      const envVar = ENV_KEY_MAP[config.type] || '';
+      result.push({
+        id,
+        type: config.type,
+        displayName: config.label || meta?.displayName || config.type,
+        isLocal: meta?.isLocal ?? false,
+        requiresApiKey: meta?.requiresApiKey ?? false,
+        envKeyVar: envVar,
+        envKeySet: !!(envVar && process.env[envVar]),
+        managed: false,
+        models,
+      });
+    }
+
+    return result;
   }
 
   private async saveSettings(updates: Partial<SettingsState>): Promise<void> {
-    const redactedKeys = new Set(['remoteApiKey', 'localApiKey']);
-    logger.info('Save requested', {
-      keys: Object.keys(updates),
-      previews: Object.fromEntries(
-        Object.entries(updates).map(([k, v]) => [k, redactedKeys.has(k) ? '[redacted]' : v]),
-      ),
-    });
+    const redactedKeys = new Set(['providers']);
+    logger.info('Save requested', { keys: Object.keys(updates) });
 
     const saved: Partial<SettingsState> = {};
     const errors: string[] = [];
@@ -113,26 +180,20 @@ export class SettingsPanel {
     for (const [key, value] of Object.entries(updates)) {
       if (value === undefined) continue;
       try {
-        // Re-acquire the configuration object before each write. VS Code
-        // can invalidate the previous snapshot after an update.
         const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
         await cfg.update(key, value, vscode.ConfigurationTarget.Global);
 
-        // Verify the write landed — workspace-level settings can mask
-        // user-level writes, which is a common cause of "settings didn't
-        // take effect" bugs.
         const readBack = vscode.workspace.getConfiguration(EXTENSION_ID).get(key);
-        if (readBack !== value) {
+        if (JSON.stringify(readBack) !== JSON.stringify(value)) {
           errors.push(
-            `${key}: saved to user settings but an overriding value "${JSON.stringify(readBack)}" ` +
-            `exists in workspace settings. Remove it from .vscode/settings.json or save to workspace scope.`,
+            `${key}: saved to user settings but an overriding value exists in workspace settings.`,
           );
-          logger.warn(`Setting "${key}" masked by workspace-level override`, { saved: value, effective: readBack });
+          logger.warn(`Setting "${key}" masked by workspace-level override`);
           continue;
         }
 
         (saved as any)[key] = value;
-        logger.info(`Setting saved: ${key} = ${redactedKeys.has(key) ? '[redacted]' : JSON.stringify(value)}`);
+        logger.info(`Setting saved: ${key}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`${key}: ${msg}`);
@@ -155,112 +216,172 @@ export class SettingsPanel {
         saved,
       });
     }
-    // Note: we do NOT call sync() here. The webview merges `saved` into its
-    // local state so the form doesn't reset. Global onDidChangeConfiguration
-    // in extension.ts will debounce and recreate the agent in the background.
   }
 
-  private async testConnection(
-    target: 'local' | 'remote',
-    overrides?: Partial<SettingsState>,
-  ): Promise<void> {
-    // Merge stored settings with any unsaved form values from the webview
-    const settings = { ...getSettings(), ...(overrides || {}) };
-
-    const providerName = target === 'local' ? settings.localProvider : settings.remoteProvider;
-    const modelName = target === 'local' ? settings.localModel : settings.remoteModel;
-    const apiKey = target === 'remote'
-      ? resolveApiKey(providerName, settings.remoteApiKey)
-      : resolveApiKey(providerName, settings.localApiKey);
-
-    const meta = PROVIDERS[providerName];
-    const rawBaseUrl = target === 'local'
-      ? (settings.localBaseUrl || meta?.defaultBaseUrl)
-      : undefined;
-    const baseUrl = normalizeBaseUrl(providerName, rawBaseUrl);
-
-    logger.info(`Testing ${target} connection`, {
-      provider: providerName,
-      model: modelName,
-      baseUrl: baseUrl || '(default)',
-      baseUrlRaw: rawBaseUrl,
-      hasApiKey: !!apiKey,
-    });
-
+  private async testConnection(providerId: string, modelName: string): Promise<void> {
     try {
+      if (providerId === MANAGED_PROVIDER_ID) {
+        await this.testManagedProvider(modelName);
+        return;
+      }
+
+      const settings = getSettings();
+      const providerConfig = settings.providers[providerId];
+      if (!providerConfig) {
+        throw new Error(`Provider "${providerId}" not found in settings.`);
+      }
+
+      const meta = getProviderMeta(providerConfig.type);
       if (!meta) {
-        throw new Error(`Unknown provider: "${providerName}"`);
+        throw new Error(`Unknown provider type "${providerConfig.type}".`);
       }
+
+      const apiKey = providerConfig.apiKey?.trim()
+        || (ENV_KEY_MAP[providerConfig.type] ? process.env[ENV_KEY_MAP[providerConfig.type]] : '')
+        || '';
+
       if (meta.requiresApiKey && !apiKey) {
-        throw new Error(`Missing API key. Set ${meta.envKeyVar} env var or fill it in the API Key field.`);
+        throw new Error(
+          `No API key found. Set ${ENV_KEY_MAP[providerConfig.type] || 'the API key'} in your environment or paste it in the API Key field and save.`,
+        );
       }
-      if (!modelName) {
-        throw new Error('Model name is empty.');
+
+      // If no model was selected, try to fetch the list and pick the first one
+      let model = modelName;
+      if (!model) {
+        try {
+          const models = await listModelsForProvider(providerConfig.type, apiKey, providerConfig.baseUrl || meta.defaultBaseUrl);
+          model = providerConfig.defaultModel || models[0] || '';
+        } catch { /* fall through */ }
+      }
+      if (!model) {
+        throw new Error('No model available. Save your API key first, then reopen settings to load the model list.');
       }
 
       const config: Record<string, unknown> = { apiKey: apiKey || 'local' };
+      const baseUrl = normalizeBaseUrl(providerConfig.type, providerConfig.baseUrl || meta.defaultBaseUrl);
       if (baseUrl) config.baseUrl = baseUrl;
 
-      const provider = await createProvider(providerName as ProviderName, config as any);
+      const provider = await createProvider(providerConfig.type as ProviderName, config as any);
 
-      // 10s timeout so a non-responsive server doesn't hang the UI forever
+      const response = await withTimeout(
+        provider.chat({
+          model,
+          messages: [{ role: 'user', content: 'Reply with the single word "ok".' }],
+          max_tokens: 16,
+        }),
+        30_000,
+        `Timed out after 30 seconds — the provider may be slow or unreachable.`,
+      );
+
+      const text = String(response.choices?.[0]?.message?.content ?? '').trim();
+      logger.info(`Connection test succeeded for ${providerId} (${model}): "${String(text).slice(0, 60)}"`);
+      this.post({
+        type: 'connection_test',
+        providerId,
+        success: true,
+        message: text ? `${model}: "${text.slice(0, 40)}"` : `${model}: connected (empty response)`,
+      });
+    } catch (err) {
+      const message = getErrorMessage(err);
+      logger.warn(`Connection test failed for ${providerId} (model=${modelName})`, err ?? '(no error detail)');
+      this.post({
+        type: 'connection_test',
+        providerId,
+        success: false,
+        message: message !== 'Unknown error' ? message : `Connection failed for ${modelName || 'unknown model'} — check provider configuration`,
+      });
+    }
+  }
+
+  private async testManagedProvider(modelName: string): Promise<void> {
+    const running = await isOllamaRunning();
+    if (!running) {
+      this.post({
+        type: 'connection_test',
+        providerId: MANAGED_PROVIDER_ID,
+        success: false,
+        message: 'Ollama is not running. Start it and try again.',
+      });
+      return;
+    }
+
+    if (!modelName) {
+      this.post({
+        type: 'connection_test',
+        providerId: MANAGED_PROVIDER_ID,
+        success: false,
+        message: 'No model selected. Pull a model first.',
+      });
+      return;
+    }
+
+    const baseUrl = normalizeBaseUrl('ollama', 'http://localhost:11434');
+
+    try {
+      const config: Record<string, unknown> = { apiKey: 'local' };
+      if (baseUrl) config.baseUrl = baseUrl;
+
+      const provider = await createProvider('ollama' as ProviderName, config as any);
       const response = await withTimeout(
         provider.chat({
           model: modelName,
           messages: [{ role: 'user', content: 'Reply with the single word "ok".' }],
           max_tokens: 16,
         }),
-        10_000,
-        `Timed out after 10 seconds connecting to ${baseUrl || providerName}.`,
+        30_000,
+        `Timed out after 30 seconds — is ${modelName} loaded?`,
       );
 
-      const text = response.choices?.[0]?.message?.content ?? '';
-
-      const normalizedNote = baseUrl && rawBaseUrl && baseUrl !== rawBaseUrl
-        ? ` (base URL normalized to ${baseUrl})`
-        : '';
-
-      logger.info(`Connection test succeeded for ${providerName}: "${String(text).slice(0, 60)}"`);
+      const text = String(response.choices?.[0]?.message?.content ?? '').trim();
       this.post({
         type: 'connection_test',
-        target,
+        providerId: MANAGED_PROVIDER_ID,
         success: true,
-        message: `Connected${normalizedNote}. Response: "${String(text).slice(0, 40)}"`,
+        message: text ? `${modelName}: "${text.slice(0, 40)}"` : `${modelName}: connected`,
       });
     } catch (err) {
-      const rawMessage = getErrorMessage(err);
-      // Decorate with provider/model context so the user knows where the failure came from
-      let message = rawMessage;
-
-      // Common error pattern: 404/not found from LM Studio/Ollama missing /v1
-      if (/404|not\s*found/i.test(rawMessage) && (providerName === 'lmstudio' || providerName === 'ollama')) {
-        message += `\n\nTip: LM Studio and Ollama expect the OpenAI-compatible API under /v1. Try setting Base URL to "${rawBaseUrl}/v1" or leaving it blank to use the default.`;
-      } else if (/ECONNREFUSED|fetch failed|network/i.test(rawMessage)) {
-        message += `\n\nCan't reach the server. Check the URL and that the service is running.`;
-      } else if (/401|unauthorized|invalid.*key/i.test(rawMessage)) {
-        message += `\n\nAPI key was rejected. Double-check it's correct and has the right permissions.`;
-      } else if (/model.*not.*found|no such model/i.test(rawMessage)) {
-        message += `\n\nThe model "${modelName}" isn't available. Check the model name.`;
-      }
-
-      logger.warn(`Connection test failed for ${providerName}`, { error: rawMessage, target });
+      const detail = getErrorMessage(err);
+      logger.warn(`Managed provider test failed: model=${modelName} baseUrl=${baseUrl}`, err);
       this.post({
         type: 'connection_test',
-        target,
+        providerId: MANAGED_PROVIDER_ID,
         success: false,
-        message,
+        message: detail !== 'Unknown error'
+          ? `${modelName}: ${detail}`
+          : `${modelName}: connection failed — verify Ollama is running on ${baseUrl} and the model is pulled`,
       });
+    }
+  }
+
+  private async pullModel(modelName: string): Promise<void> {
+    try {
+      this.post({ type: 'model_pull_progress', model: modelName, status: 'Ensuring Ollama is ready...' });
+
+      await ensureManagedProvider();
+
+      this.post({ type: 'model_pull_progress', model: modelName, status: 'Starting download...' });
+
+      await pullOllamaModel(
+        modelName,
+        (status, pct) => {
+          this.post({ type: 'model_pull_progress', model: modelName, status, percent: pct });
+        },
+      );
+
+      this.post({ type: 'model_pull_complete', model: modelName, success: true });
+      await this.sync();
+    } catch (err) {
+      this.post({ type: 'model_pull_complete', model: modelName, success: false, error: getErrorMessage(err) });
     }
   }
 
   private async resetToDefaults(): Promise<void> {
     const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
     const keys: (keyof SettingsState)[] = [
-      'localProvider', 'localModel', 'localBaseUrl',
-      'remoteProvider', 'remoteModel', 'remoteApiKey', 'remoteBaseUrl',
+      'providers', 'routing', 'triageEnabled',
       'permissionMode', 'maxIterations', 'maxContextTokens',
-      'triageEnabled', 'autoCompact', 'autoCompactThreshold',
-      'instructionFile',
+      'autoCompact', 'autoCompactThreshold', 'instructionFile', 'shell',
     ];
     for (const key of keys) {
       await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
@@ -309,7 +430,7 @@ export class SettingsPanel {
       font-src ${csp};">
   <link rel="stylesheet" href="${styleUri}">
   <link rel="modulepreload" href="${sharedUri}">
-  <title>Clodcode Settings</title>
+  <title>Oboto Settings</title>
 </head>
 <body>
   <div id="settings-root"></div>

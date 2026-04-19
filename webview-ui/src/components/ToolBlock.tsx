@@ -81,7 +81,7 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
 
   return (
     <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 group relative fade-in">
-      <ActionMenu content={command + '\n' + (output || '')} onRevert={onRevert} id={id} />
+      <ActionMenu content={command + '\n' + (output || '')} onRevert={onRevert} id={id} role="assistant" />
 
       <div
         className="flex items-center gap-3 cursor-pointer select-none bg-zinc-900/40 hover:bg-zinc-800/60 p-2 rounded-md border border-zinc-800/50 transition-colors"

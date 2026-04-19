@@ -1,70 +1,56 @@
 import * as vscode from 'vscode';
 import { EXTENSION_ID } from '../shared/constants';
 
-export interface PromptRouteEntry {
-  provider: string;
-  model: string;
+export interface ProviderConfig {
+  type: string;
+  label?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  defaultModel?: string;
 }
 
-export type PromptRole = 'orchestrator' | 'planner' | 'actor' | 'summarizer';
+export type PromptRole = 'triage' | 'executor' | 'planner' | 'summarizer';
 
-export interface ClodcodeSettings {
-  localProvider: string;
-  localModel: string;
-  localBaseUrl: string;
-  localApiKey: string;
-  remoteProvider: string;
-  remoteModel: string;
-  remoteApiKey: string;
-  remoteBaseUrl: string;
-  providerKeys: Record<string, string>;
+export interface RouteAssignment {
+  providerId: string;
+  model?: string;
+}
+
+export interface ObotovsSettings {
+  providers: Record<string, ProviderConfig>;
+  routing: Partial<Record<PromptRole, RouteAssignment>>;
+  triageEnabled: boolean;
   permissionMode: 'readonly' | 'workspace-write' | 'full-access' | 'prompt';
   maxIterations: number;
   maxContextTokens: number;
-  triageEnabled: boolean;
   autoCompact: boolean;
   autoCompactThreshold: number;
   instructionFile: string;
-  // ── Multi-agent ──────────────────────────────────────────────────
   maxConcurrentAgents: number;
   defaultAgentBudgetUsd: number;
   agentTimeoutMs: number;
   maxAgentNestingDepth: number;
-  // ── Surfaces ─────────────────────────────────────────────────────
   surfacesAutoOpen: boolean;
-  // ── UI control (nut.js) ──────────────────────────────────────────
   uiControlEnabled: boolean;
-  // ── Peer coordination ────────────────────────────────────────────
-  /** When false, incoming peer dispatch/ask requests are silently rejected. */
   peerDispatchEnabled: boolean;
-  // ── Prompt routing ────────────────────────────────────────────────
-  /** Per-role provider+model overrides. Roles: orchestrator, planner, actor, summarizer. */
-  promptRouting: Partial<Record<PromptRole, PromptRouteEntry>>;
-  // ── Round-robin ───────────────────────────────────────────────────
-  roundRobinEnabled: boolean;
-  /** Per-provider model overrides for round-robin, e.g. { "openai": "gpt-4o", "anthropic": "claude-sonnet-4-20250514" } */
-  roundRobinModels: Record<string, string>;
-  // ── Shell ────────────────────────────────────────────────────────
   shell: string;
 }
 
-export function getSettings(): ClodcodeSettings {
+const DEFAULT_ROUTING: Record<string, RouteAssignment> = {
+  triage:   { providerId: 'oboto' },
+  executor: { providerId: 'oboto' },
+};
+
+export function getSettings(): ObotovsSettings {
   const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
 
   return {
-    localProvider: cfg.get<string>('localProvider', 'ollama'),
-    localModel: cfg.get<string>('localModel', 'llama3:8b'),
-    localBaseUrl: cfg.get<string>('localBaseUrl', 'http://localhost:11434'),
-    localApiKey: cfg.get<string>('localApiKey', ''),
-    remoteProvider: cfg.get<string>('remoteProvider', 'anthropic'),
-    remoteModel: cfg.get<string>('remoteModel', 'claude-sonnet-4-20250514'),
-    remoteApiKey: cfg.get<string>('remoteApiKey', ''),
-    remoteBaseUrl: cfg.get<string>('remoteBaseUrl', ''),
-    providerKeys: cfg.get<Record<string, string>>('providerKeys', {}),
-    permissionMode: cfg.get<ClodcodeSettings['permissionMode']>('permissionMode', 'prompt'),
-    maxIterations: cfg.get<number>('maxIterations', 25),
-    maxContextTokens: cfg.get<number>('maxContextTokens', 128_000),
+    providers: cfg.get<Record<string, ProviderConfig>>('providers', {}),
+    routing: cfg.get<Partial<Record<PromptRole, RouteAssignment>>>('routing', DEFAULT_ROUTING),
     triageEnabled: cfg.get<boolean>('triageEnabled', true),
+    permissionMode: cfg.get<ObotovsSettings['permissionMode']>('permissionMode', 'prompt'),
+    maxIterations: cfg.get<number>('maxIterations', 50),
+    maxContextTokens: cfg.get<number>('maxContextTokens', 128_000),
     autoCompact: cfg.get<boolean>('autoCompact', true),
     autoCompactThreshold: cfg.get<number>('autoCompactThreshold', 150_000),
     instructionFile: cfg.get<string>('instructionFile', 'CLAUDE.md'),
@@ -75,23 +61,11 @@ export function getSettings(): ClodcodeSettings {
     surfacesAutoOpen: cfg.get<boolean>('surfacesAutoOpen', true),
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
-    promptRouting: cfg.get<Partial<Record<PromptRole, PromptRouteEntry>>>('promptRouting', {
-      orchestrator: { provider: 'gemini', model: 'gemini-3-flash-preview' },
-      planner: { provider: 'gemini', model: 'gemini-3.1-pro-preview' },
-      actor: { provider: 'gemini', model: 'gemini-3-flash-preview' },
-      summarizer: { provider: 'local', model: '' },
-    }),
-    roundRobinEnabled: cfg.get<boolean>('roundRobinEnabled', false),
-    roundRobinModels: cfg.get<Record<string, string>>('roundRobinModels', {}),
     shell: cfg.get<string>('shell', ''),
   };
 }
 
-/**
- * Watch for settings changes and call the handler.
- * Returns a disposable to stop watching.
- */
-export function onSettingsChanged(handler: (settings: ClodcodeSettings) => void): vscode.Disposable {
+export function onSettingsChanged(handler: (settings: ObotovsSettings) => void): vscode.Disposable {
   return vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration(EXTENSION_ID)) {
       handler(getSettings());

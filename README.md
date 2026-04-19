@@ -1,4 +1,4 @@
-# Clodcode
+# Obotovs
 
 Multi-LLM AI coding assistant for VS Code with background agents, hierarchical memory, peer coordination, and a full tool ecosystem.
 
@@ -6,7 +6,7 @@ Multi-LLM AI coding assistant for VS Code with background agents, hierarchical m
 
 ### Multi-Provider LLM Support
 
-Clodcode supports local and cloud LLM providers with a dual-model triage architecture — fast local models handle simple queries while powerful remote models tackle complex tasks.
+Oboto VS supports local and cloud LLM providers with a dual-model triage architecture — fast local models handle simple queries while powerful remote models tackle complex tasks.
 
 | Provider | Type | Default Model |
 |----------|------|---------------|
@@ -39,7 +39,7 @@ Clodcode supports local and cloud LLM providers with a dual-model triage archite
 | **User** | questions, secret/API key requests |
 | **Surfaces** | create/update/delete AI-authored HTML panels |
 | **Routes** | Next.js-style API endpoints (GET/POST/PUT/DELETE/PATCH) |
-| **Skills** | Markdown playbooks discovered from `.clodcode/skills/` |
+| **Skills** | Markdown playbooks discovered from `.obotovs/skills/` |
 | **Agents** | spawn, query, list, cancel background agents |
 | **Memory** | add, recall, promote, list, forget across scopes |
 | **Peers** | list, dispatch tasks, ask questions across VS Code windows |
@@ -57,16 +57,16 @@ Tool outputs are auto-captured at low strength. The LLM promotes noteworthy entr
 
 ### Surfaces & Routes
 
-- **Surfaces** — AI-authored HTML pages rendered in VS Code webview panels. Stored in `.clodcode/surfaces/`. Can use CDN libraries (React, Tailwind, etc.) and call local API routes.
-- **Routes** — Local API endpoints following Next.js App Router conventions. Stored in `.clodcode/routes/`. Supports dynamic segments (`[id]`), hot-reloads on file change.
+- **Surfaces** — AI-authored HTML pages rendered in VS Code webview panels. Stored in `.obotovs/surfaces/`. Can use CDN libraries (React, Tailwind, etc.) and call local API routes.
+- **Routes** — Local API endpoints following Next.js App Router conventions. Stored in `.obotovs/routes/`. Supports dynamic segments (`[id]`), hot-reloads on file change.
 
 ### Workspace Skills
 
-Drop markdown files in `.clodcode/skills/` with optional YAML frontmatter (`name`, `description`, `when`). The agent discovers and applies them automatically.
+Drop markdown files in `.obotovs/skills/` with optional YAML frontmatter (`name`, `description`, `when`). The agent discovers and applies them automatically.
 
 ### Peer Coordination
 
-Multiple VS Code windows running Clodcode on the same workspace discover each other via HTTP heartbeats. Agents can dispatch tasks to peers (with user approval) and ask questions across windows.
+Multiple VS Code windows running Oboto VS on the same workspace discover each other via HTTP heartbeats. Agents can dispatch tasks to peers (with user approval) and ask questions across windows.
 
 ### Permission Modes
 
@@ -84,7 +84,7 @@ Multiple VS Code windows running Clodcode on the same workspace discover each ot
 ```bash
 npm run build
 npm run package
-code --install-extension clodcode-0.1.1.vsix
+code --install-extension obotovs-0.1.1.vsix
 ```
 
 ### Development
@@ -99,33 +99,33 @@ Press **F5** in VS Code to launch the Extension Development Host.
 
 ## Configuration
 
-All settings are under `clodcode.*` in VS Code settings. Key options:
+All settings are under `obotovs.*` in VS Code settings. Key options:
 
 ```jsonc
 {
   // LLM providers
-  "clodcode.localProvider": "ollama",
-  "clodcode.localModel": "llama3:8b",
-  "clodcode.remoteProvider": "anthropic",
-  "clodcode.remoteModel": "claude-sonnet-4-20250514",
+  "obotovs.localProvider": "ollama",
+  "obotovs.localModel": "llama3:8b",
+  "obotovs.remoteProvider": "anthropic",
+  "obotovs.remoteModel": "claude-sonnet-4-20250514",
 
   // Agent limits
-  "clodcode.maxConcurrentAgents": 5,
-  "clodcode.defaultAgentBudgetUsd": 0.5,
-  "clodcode.agentTimeoutMs": 300000,
+  "obotovs.maxConcurrentAgents": 5,
+  "obotovs.defaultAgentBudgetUsd": 0.5,
+  "obotovs.agentTimeoutMs": 300000,
 
   // Behavior
-  "clodcode.permissionMode": "prompt",
-  "clodcode.triageEnabled": true,
-  "clodcode.maxIterations": 25,
-  "clodcode.maxContextTokens": 128000,
-  "clodcode.autoCompact": true,
+  "obotovs.permissionMode": "prompt",
+  "obotovs.triageEnabled": true,
+  "obotovs.maxIterations": 50,
+  "obotovs.maxContextTokens": 128000,
+  "obotovs.autoCompact": true,
 
   // Features
-  "clodcode.surfacesAutoOpen": false,
-  "clodcode.uiControlEnabled": false,
-  "clodcode.peerDispatchEnabled": true,
-  "clodcode.instructionFile": "CLAUDE.md"
+  "obotovs.surfacesAutoOpen": false,
+  "obotovs.uiControlEnabled": false,
+  "obotovs.peerDispatchEnabled": true,
+  "obotovs.instructionFile": "CLAUDE.md"
 }
 ```
 
@@ -141,7 +141,7 @@ API keys are read from environment variables or can be entered via the settings 
 
 ## Project Instructions
 
-Place a `CLAUDE.md` file in your workspace root (or any parent directory) to provide project-specific context to the agent. The filename is configurable via `clodcode.instructionFile`.
+Place a `CLAUDE.md` file in your workspace root (or any parent directory) to provide project-specific context to the agent. The filename is configurable via `obotovs.instructionFile`.
 
 ## Architecture
 
@@ -187,7 +187,7 @@ webview-ui/src/
 
 | Command | Keybinding | Description |
 |---------|-----------|-------------|
-| Focus Chat | `Cmd+Shift+L` | Focus the Clodcode sidebar |
+| Focus Chat | `Cmd+Shift+L` | Focus the Oboto VS sidebar |
 | New Session | — | Start a fresh conversation |
 | Switch Model | — | Change the active LLM |
 | Ask About Selection | Context menu | Ask the agent about selected code |

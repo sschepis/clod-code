@@ -14,7 +14,7 @@ function workspaceRoot(): string | null {
 }
 
 export function surfacesDir(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.clodcode', 'surfaces');
+  return path.join(workspaceRoot, '.obotovs', 'surfaces');
 }
 
 export function surfaceFile(workspaceRoot: string, name: string): string {
@@ -99,7 +99,7 @@ export class SurfaceManager {
     if (fromAi && !this.opts.isAutoOpenEnabled()) {
       return {
         ok: false,
-        reason: 'AI-initiated panel opening is disabled. Enable "Clodcode: Surfaces Auto Open" in Clodcode Settings, or open the surface manually via the command palette "Clodcode: Open Surface".',
+        reason: 'AI-initiated panel opening is disabled. Enable "Oboto VS: Surfaces Auto Open" in Oboto VS Settings, or open the surface manually via the command palette "Oboto VS: Open Surface".',
       };
     }
     if (!SURFACE_NAME_RE.test(name)) {
@@ -131,11 +131,11 @@ export class SurfaceManager {
   async openPicker(): Promise<void> {
     const names = this.listSurfaces();
     if (names.length === 0) {
-      vscode.window.showInformationMessage('No surfaces found in .clodcode/surfaces/.');
+      vscode.window.showInformationMessage('No surfaces found in .obotovs/surfaces/.');
       return;
     }
     const pick = await vscode.window.showQuickPick(names, {
-      title: 'Clodcode: Open Surface',
+      title: 'Oboto VS: Open Surface',
       placeHolder: 'Pick a surface to open',
     });
     if (!pick) return;
@@ -160,7 +160,7 @@ export class SurfaceManager {
   private installWatcher(): void {
     const root = workspaceRoot();
     if (!root) return;
-    const pattern = new vscode.RelativePattern(root, '.clodcode/surfaces/*.html');
+    const pattern = new vscode.RelativePattern(root, '.obotovs/surfaces/*.html');
     try {
       this.watcher = vscode.workspace.createFileSystemWatcher(pattern);
       this.watcher.onDidChange((uri) => {

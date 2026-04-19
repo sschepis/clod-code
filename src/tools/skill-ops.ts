@@ -11,7 +11,7 @@ export function createSkillListHandler(deps: SkillToolDeps) {
     if (skills.length === 0) {
       return (
         '[INFO] No skills defined in this workspace.\n\n' +
-        'Create markdown files under `.clodcode/skills/` to add skills. Each file may start ' +
+        'Create markdown files under `.obotovs/skills/` to add skills. Each file may start ' +
         'with a `---` frontmatter block containing `name`, `description`, and optionally `when`:\n\n' +
         '```markdown\n' +
         '---\n' +

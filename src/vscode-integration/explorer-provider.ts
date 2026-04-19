@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { AgentSummary } from '../shared/message-types';
 
-export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'clodcode-item' | 'task-group' | 'task-item';
+export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'obotovs-item' | 'task-group' | 'task-item';
 
-const MIME_TYPE = 'application/vnd.code.tree.clodcode.explorer';
+const MIME_TYPE = 'application/vnd.code.tree.obotovs.explorer';
 
 export class ExplorerNode extends vscode.TreeItem {
   readonly nodeType: ExplorerNodeType;
@@ -60,7 +60,7 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
   }
 
   createTreeView(): vscode.TreeView<ExplorerNode> {
-    this.treeView = vscode.window.createTreeView('clodcode.explorer', {
+    this.treeView = vscode.window.createTreeView('obotovs.explorer', {
       treeDataProvider: this,
       canSelectMany: true,
       dragAndDropController: this,
@@ -72,7 +72,7 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
   // ── Drag & Drop ──────────────────────────────────────────────────────
 
   handleDrag(source: readonly ExplorerNode[], dataTransfer: vscode.DataTransfer): void {
-    const draggable = source.filter(n => n.resourceUri && (n.nodeType === 'file' || n.nodeType === 'directory' || n.nodeType === 'clodcode-item'));
+    const draggable = source.filter(n => n.resourceUri && (n.nodeType === 'file' || n.nodeType === 'directory' || n.nodeType === 'obotovs-item'));
     if (draggable.length === 0) return;
     dataTransfer.set(MIME_TYPE, new vscode.DataTransferItem(draggable.map(n => n.resourceUri!.toString())));
   }
@@ -184,8 +184,8 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
           case 'Skills': subfolder = 'skills'; category = 'skill'; break;
         }
 
-        const clodcodeDir = vscode.Uri.joinPath(rootUri, '.clodcode', subfolder);
-        return this.getFileSystemChildren(clodcodeDir, category);
+        const obotovsDir = vscode.Uri.joinPath(rootUri, '.obotovs', subfolder);
+        return this.getFileSystemChildren(obotovsDir, category);
       }
     }
 
@@ -354,7 +354,7 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
           if (category === 'surface' && name.endsWith('.html')) {
             const surfaceName = name.replace(/\.html$/, '');
             command = {
-              command: 'clodcode.openSurface',
+              command: 'obotovs.openSurface',
               title: 'Open Surface',
               arguments: [surfaceName]
             };
@@ -367,11 +367,11 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
           }
         }
 
-        const isClodcodeItem = !!category;
+        const isObotovsItem = !!category;
         const node = new ExplorerNode(
           name,
           isDir ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-          isDir ? 'directory' : (isClodcodeItem ? 'clodcode-item' : 'file'),
+          isDir ? 'directory' : (isObotovsItem ? 'obotovs-item' : 'file'),
           itemUri,
           undefined,
           command

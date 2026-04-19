@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import type { Session } from '@sschepis/as-agent';
 import { SESSION_AUTO_SAVE_DEBOUNCE_MS } from '../shared/constants';
 
-const LAST_WINDOW_ID_KEY = 'clodcode.lastWindowId';
+const LAST_WINDOW_ID_KEY = 'obotovs.lastWindowId';
 const LEGACY_FILE = 'current.json';
 
 export interface SessionStoreOptions {
@@ -48,7 +48,7 @@ export class SessionStore {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.save(session).catch(err => {
-        console.warn('[clodcode] Session save failed:', err);
+        console.warn('[obotovs] Session save failed:', err);
       });
     }, SESSION_AUTO_SAVE_DEBOUNCE_MS);
   }
@@ -170,7 +170,7 @@ export class SessionStore {
     if (existing) clearTimeout(existing);
     this.panelSaveTimers.set(panelId, setTimeout(() => {
       this.savePanel(panelId, session).catch(err => {
-        console.warn(`[clodcode] Panel session save failed for ${panelId}:`, err);
+        console.warn(`[obotovs] Panel session save failed for ${panelId}:`, err);
       });
     }, SESSION_AUTO_SAVE_DEBOUNCE_MS));
   }

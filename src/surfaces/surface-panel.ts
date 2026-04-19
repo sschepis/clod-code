@@ -21,7 +21,7 @@ export interface SurfaceError {
 export interface SurfacePanelOptions {
   /** Surface name (without .html extension). */
   name: string;
-  /** Absolute path to the HTML file under `.clodcode/surfaces/`. */
+  /** Absolute path to the HTML file under `.obotovs/surfaces/`. */
   filePath: string;
   /** The workspace root. Used for `localResourceRoots`. */
   workspaceRoot: string;
@@ -39,7 +39,7 @@ export interface SurfacePanelOptions {
 
 /**
  * One webview panel per surface. Loads the user's HTML verbatim, injecting a
- * permissive-but-localhost-bounded CSP and a `window.__CLODCODE_ROUTES_URL__`
+ * permissive-but-localhost-bounded CSP and a `window.__OBOTOVS_ROUTES_URL__`
  * bootstrap script in `<head>`.
  */
 export class SurfacePanel {
@@ -51,10 +51,10 @@ export class SurfacePanel {
 
   constructor(private readonly opts: SurfacePanelOptions) {
     this.surfacesDir = path.dirname(opts.filePath);
-    this.routesDir = path.join(opts.workspaceRoot, '.clodcode', 'routes');
+    this.routesDir = path.join(opts.workspaceRoot, '.obotovs', 'routes');
 
     this.panel = vscode.window.createWebviewPanel(
-      'clodcode.surface',
+      'obotovs.surface',
       `Surface: ${opts.name}`,
       vscode.ViewColumn.One,
       {
@@ -62,7 +62,7 @@ export class SurfacePanel {
         retainContextWhenHidden: true,
         localResourceRoots: [
           vscode.Uri.file(this.surfacesDir),
-          vscode.Uri.file(path.join(opts.workspaceRoot, '.clodcode')),
+          vscode.Uri.file(path.join(opts.workspaceRoot, '.obotovs')),
         ],
       },
     );
@@ -78,7 +78,7 @@ export class SurfacePanel {
       const m = msg as Record<string, unknown>;
       
       // Surface Error Reporting
-      if (m.type === 'clodcode:surface-error' && opts.onError) {
+      if (m.type === 'obotovs:surface-error' && opts.onError) {
         opts.onError({
           name: this.opts.name,
           message: String(m.message ?? ''),
@@ -90,22 +90,22 @@ export class SurfacePanel {
       }
       
       // API: Submit to Agent
-      if (m.type === 'clodcode:submit-to-agent' && opts.onSubmitToAgent) {
+      if (m.type === 'obotovs:submit-to-agent' && opts.onSubmitToAgent) {
         opts.onSubmitToAgent(String(m.text || ''), m.agentId as string | undefined);
       }
       
       // API: Execute Tool
-      if (m.type === 'clodcode:execute-tool' && opts.onExecuteTool) {
+      if (m.type === 'obotovs:execute-tool' && opts.onExecuteTool) {
         try {
           const result = await opts.onExecuteTool(String(m.tool), m.kwargs as Record<string, unknown>);
           this.panel.webview.postMessage({ 
-            type: 'clodcode:tool-result', 
+            type: 'obotovs:tool-result', 
             id: m.id, 
             result 
           });
         } catch (err: any) {
           this.panel.webview.postMessage({ 
-            type: 'clodcode:tool-error', 
+            type: 'obotovs:tool-error', 
             id: m.id, 
             error: err.message 
           });
@@ -122,9 +122,9 @@ export class SurfacePanel {
     if (this.disposed) return;
     this.opts.routesUrl = url;
     // Push the new URL without a full reload via postMessage; the surface
-    // can listen for 'clodcode:routes' messages if it wants to react.
-    this.panel.webview.postMessage({ type: 'clodcode:routes', url });
-    // Also re-render so new `fetch(window.__CLODCODE_ROUTES_URL__ + …)` calls
+    // can listen for 'obotovs:routes' messages if it wants to react.
+    this.panel.webview.postMessage({ type: 'obotovs:routes', url });
+    // Also re-render so new `fetch(window.__OBOTOVS_ROUTES_URL__ + …)` calls
     // on hard reload pick up the new URL.
     this.render();
   }
@@ -149,7 +149,7 @@ export class SurfacePanel {
     if (this.lastUserHtml && stripStyles(this.lastUserHtml) === stripStyles(newHtml)) {
       // Only styles changed — do HMR
       this.lastUserHtml = newHtml;
-      this.panel.webview.postMessage({ type: 'clodcode:hmr', html: newHtml });
+      this.panel.webview.postMessage({ type: 'obotovs:hmr', html: newHtml });
     } else {
       // Structural/Script changes — full reload
       this.render();
@@ -190,19 +190,19 @@ export class SurfacePanel {
     const injections =
       `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +
       `<script nonce="${nonce}">\n` +
-      `  window.__CLODCODE_ROUTES_URL__ = ${routesUrlJson};\n` +
-      `  window.__CLODCODE_SURFACE__ = ${JSON.stringify(this.opts.name)};\n` +
+      `  window.__OBOTOVS_ROUTES_URL__ = ${routesUrlJson};\n` +
+      `  window.__OBOTOVS_SURFACE__ = ${JSON.stringify(this.opts.name)};\n` +
       `  window.addEventListener('message', function(e){\n` +
       `    var d = e && e.data; if (!d) return;\n` +
-      `    if (d.type === 'clodcode:routes') window.__CLODCODE_ROUTES_URL__ = d.url;\n` +
-      `    if (d.type === 'clodcode:hmr') {\n` +
+      `    if (d.type === 'obotovs:routes') window.__OBOTOVS_ROUTES_URL__ = d.url;\n` +
+      `    if (d.type === 'obotovs:hmr') {\n` +
       `      var parser = new DOMParser();\n` +
       `      var doc = parser.parseFromString(d.html, 'text/html');\n` +
       `      var newStyles = doc.querySelectorAll('style');\n` +
       `      var oldStyles = document.querySelectorAll('style');\n` +
       `      oldStyles.forEach(function(s) { s.remove(); });\n` +
       `      newStyles.forEach(function(s) { document.head.appendChild(s); });\n` +
-      `      console.log('[clodcode] HMR: Updated styles without reloading');\n` +
+      `      console.log('[obotovs] HMR: Updated styles without reloading');\n` +
       `    }\n` +
       `  });\n` +
       `  (function(){\n` +
@@ -212,7 +212,7 @@ export class SurfacePanel {
       `      var key = msg + ':' + (line||0);\n` +
       `      if (sent[key]) return;\n` +
       `      sent[key] = 1;\n` +
-      `      vsc.postMessage({ type: 'clodcode:surface-error', message: msg, source: src, lineno: line, colno: col, stack: stack });\n` +
+      `      vsc.postMessage({ type: 'obotovs:surface-error', message: msg, source: src, lineno: line, colno: col, stack: stack });\n` +
       `    }\n` +
       `    window.onerror = function(msg, src, line, col, err) {\n` +
       `      report(String(msg), src, line, col, err && err.stack ? err.stack : undefined);\n` +

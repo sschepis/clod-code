@@ -10,13 +10,13 @@ export interface SurfaceToolDeps {
 function surfaceFilePath(name: string): string | null {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return null;
-  return path.join(folders[0].uri.fsPath, '.clodcode', 'surfaces', `${name}.html`);
+  return path.join(folders[0].uri.fsPath, '.obotovs', 'surfaces', `${name}.html`);
 }
 
 export function createSurfaceListHandler(deps: SurfaceToolDeps) {
   return async (_kwargs: Record<string, unknown>): Promise<string> => {
     const names = deps.manager.listSurfaces();
-    if (names.length === 0) return 'No surfaces found in .clodcode/surfaces/.';
+    if (names.length === 0) return 'No surfaces found in .obotovs/surfaces/.';
     return names.join('\n');
   };
 }

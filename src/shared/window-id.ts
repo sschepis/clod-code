@@ -27,7 +27,7 @@ export function workspaceRoot(): string | null {
 }
 
 function windowsDir(root: string): string {
-  return path.join(root, '.clodcode', 'windows');
+  return path.join(root, '.obotovs', 'windows');
 }
 
 function presenceFile(root: string, id: string): string {

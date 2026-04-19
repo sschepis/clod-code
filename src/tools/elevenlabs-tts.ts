@@ -80,7 +80,7 @@ export function createSpeakHandler(deps: ElevenLabsTtsDeps) {
     const model = String(kwargs.model || 'eleven_multilingual_v2').trim();
 
     const audio = await ttsRequest(apiKey, voiceId, text, model);
-    const tmpFile = path.join(os.tmpdir(), `clodcode-tts-${Date.now()}.mp3`);
+    const tmpFile = path.join(os.tmpdir(), `obotovs-tts-${Date.now()}.mp3`);
     fs.writeFileSync(tmpFile, audio);
 
     try {

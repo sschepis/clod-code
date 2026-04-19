@@ -376,46 +376,62 @@ export interface SlashCommandInfo {
 
 // ── Settings panel protocol ───────────────────────────────────────────
 
+export interface SettingsProviderConfig {
+  type: string;
+  label?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  defaultModel?: string;
+}
+
+export interface SettingsRouteAssignment {
+  providerId: string;
+  model?: string;
+}
+
 export interface SettingsState {
-  localProvider: string;
-  localModel: string;
-  localBaseUrl: string;
-  localApiKey: string;
-  remoteProvider: string;
-  remoteModel: string;
-  remoteApiKey: string;
-  remoteBaseUrl: string;
+  providers: Record<string, SettingsProviderConfig>;
+  routing: Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer', SettingsRouteAssignment>>;
+  triageEnabled: boolean;
   permissionMode: 'readonly' | 'workspace-write' | 'full-access' | 'prompt';
   maxIterations: number;
   maxContextTokens: number;
-  triageEnabled: boolean;
   autoCompact: boolean;
   autoCompactThreshold: number;
   instructionFile: string;
   maxConcurrentAgents: number;
   defaultAgentBudgetUsd: number;
   agentTimeoutMs: number;
+  shell: string;
 }
 
 export interface ProviderOption {
-  name: string;
+  id: string;
+  type: string;
   displayName: string;
   isLocal: boolean;
   requiresApiKey: boolean;
   envKeyVar: string;
   envKeySet: boolean;
+  managed: boolean;
   defaultBaseUrl?: string;
+  models: string[];
+  /** For the managed provider: whether the backing service (Ollama) is reachable. */
+  serviceRunning?: boolean;
 }
 
 export type SettingsExtToWebview =
   | { type: 'sync'; settings: SettingsState; providers: ProviderOption[] }
   | { type: 'save_result'; success: boolean; message: string; saved: Partial<SettingsState> }
-  | { type: 'connection_test'; target: 'local' | 'remote'; success: boolean; message: string };
+  | { type: 'connection_test'; providerId: string; success: boolean; message: string }
+  | { type: 'model_pull_progress'; model: string; status: string; percent?: number }
+  | { type: 'model_pull_complete'; model: string; success: boolean; error?: string };
 
 export type SettingsWebviewToExt =
   | { type: 'ready' }
   | { type: 'save'; settings: Partial<SettingsState> }
-  | { type: 'test_connection'; target: 'local' | 'remote'; overrides?: Partial<SettingsState> }
+  | { type: 'test_connection'; providerId: string; model: string }
+  | { type: 'pull_model'; model: string }
   | { type: 'reset_to_defaults' }
   | { type: 'open_logs' };
 

@@ -125,7 +125,7 @@ export class RouteManager {
   }
 
   private installWatcher(root: string): void {
-    const pattern = new vscode.RelativePattern(root, '.clodcode/routes/**/*');
+    const pattern = new vscode.RelativePattern(root, '.obotovs/routes/**/*');
     try {
       this.watcher = vscode.workspace.createFileSystemWatcher(pattern);
       

@@ -45,7 +45,7 @@ export const ObjectManagerView: React.FC<ObjectManagerViewProps> = ({
           count={objects.surfaces.length}
         >
           {objects.surfaces.length === 0 ? (
-            <Empty>No surfaces. Create `.clodcode/surfaces/&lt;name&gt;.html`.</Empty>
+            <Empty>No surfaces. Create `.obotovs/surfaces/&lt;name&gt;.html`.</Empty>
           ) : (
             objects.surfaces.map((s) => (
               <SurfaceRow key={s.name} surface={s} onAction={onObjectAction} />
@@ -59,7 +59,7 @@ export const ObjectManagerView: React.FC<ObjectManagerViewProps> = ({
           count={objects.routes.length}
         >
           {objects.routes.length === 0 ? (
-            <Empty>No routes. Create `.clodcode/routes/…/route.js`.</Empty>
+            <Empty>No routes. Create `.obotovs/routes/…/route.js`.</Empty>
           ) : (
             <RouteTree routes={objects.routes} onAction={onObjectAction} />
           )}
@@ -71,7 +71,7 @@ export const ObjectManagerView: React.FC<ObjectManagerViewProps> = ({
           count={objects.skills.length}
         >
           {objects.skills.length === 0 ? (
-            <Empty>No skills. Add `.clodcode/skills/&lt;name&gt;.md`.</Empty>
+            <Empty>No skills. Add `.obotovs/skills/&lt;name&gt;.md`.</Empty>
           ) : (
             <SkillTree skills={objects.skills} onAction={onObjectAction} />
           )}

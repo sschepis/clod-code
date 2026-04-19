@@ -16,17 +16,16 @@ import type { ObotoAgent as ObotoAgentType } from '@sschepis/oboto-agent';
 import type { Session, AgentRuntime } from '@sschepis/as-agent';
 import type { Router } from '@sschepis/swiss-army-tool';
 
-import type { ClodcodeSettings, PromptRole } from '../config/settings';
+import type { ObotovsSettings, PromptRole } from '../config/settings';
 import type { ModelInfo } from '../shared/message-types';
 import type { SkillManager } from '../skills/skill-manager';
 import { DEFAULT_MODEL_PRICING, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_PRESERVE_RECENT_MESSAGES } from '../config/defaults';
-import { createProviders } from './providers';
+import { createProviders, resolveRole } from './providers';
 import { buildSystemPrompt } from './system-prompt';
 import { createPermissionPolicy, type PermissionModeLabel } from './permission-prompter';
 import { logger } from '../shared/logger';
 import { dynamicImport } from '../shared/dynamic-import';
 import { getErrorMessage } from '../shared/errors';
-import { isModelCompatibleWithProvider, inferProviderFromModel } from '../config/model-inference';
 import { getProviderMeta } from '../config/provider-registry';
 
 // ── UI-neutral event types ─────────────────────────────────────────────
@@ -53,7 +52,7 @@ export type HostEventListener = (event: HostEvent) => void;
 
 export interface AgentHostConfig {
   id: string;
-  settings: ClodcodeSettings;
+  settings: ObotovsSettings;
   router: Router;
   agentRuntime?: AgentRuntime;
   /** Initial session; omit for empty. */
@@ -64,7 +63,7 @@ export interface AgentHostConfig {
   permissionModeOverride?: PermissionModeLabel;
   /** Optional skill manager — when provided, skills are listed in the system prompt. */
   skills?: SkillManager;
-  /** Prompt routing role — controls which provider/model is used via promptRouting settings. */
+  /** Routing role — controls which provider/model is used from the routing config. */
   role?: PromptRole;
 }
 
@@ -73,7 +72,7 @@ export interface AgentHostConfig {
 export class AgentHost {
   public readonly id: string;
   private agent?: ObotoAgentType;
-  private settings: ClodcodeSettings;
+  private settings: ObotovsSettings;
   private router: Router;
   private agentRuntime?: AgentRuntime;
   private permissionPolicy?: ReturnType<typeof createPermissionPolicy>;
@@ -111,7 +110,7 @@ export class AgentHost {
   }
 
   /** Recreate the agent with new settings while preserving the session. */
-  async recreate(newSettings: ClodcodeSettings): Promise<void> {
+  async recreate(newSettings: ObotovsSettings): Promise<void> {
     if (this.disposed) return;
     this.settings = newSettings;
     const session = this.agent?.getSession();
@@ -222,10 +221,8 @@ export class AgentHost {
       this.emit({ type: 'initialized', model: this.activeModel });
 
       logger.info(`AgentHost "${this.id}" initialized`, {
-        localProvider: this.settings.localProvider,
-        localModel: providers.localModelName,
-        remoteProvider: this.settings.remoteProvider,
-        remoteModel: providers.remoteModelName,
+        triageModel: providers.localModelName,
+        executorModel: providers.remoteModelName,
       });
     } catch (err) {
       const msg = getErrorMessage(err);
@@ -353,37 +350,25 @@ export class AgentHost {
   }
 
   private computeActiveModel(): ModelInfo {
-    // Resolve effective provider/model considering prompt routing
-    const routing = this.settings.promptRouting;
-    let effectiveProvider = this.settings.remoteProvider;
-    let effectiveModel = this.settings.remoteModel;
+    try {
+      const resolved = resolveRole(this.role ?? 'executor', this.settings);
+      const providerMeta = getProviderMeta(resolved.providerType);
 
-    if (routing && Object.keys(routing).length > 0) {
-      if (this.role && routing[this.role]) {
-        effectiveProvider = routing[this.role]!.provider;
-        effectiveModel = routing[this.role]!.model;
-      } else if (!this.role && routing.actor) {
-        effectiveProvider = routing.actor.provider;
-        effectiveModel = routing.actor.model;
-      }
+      return {
+        provider: resolved.providerId,
+        providerDisplayName: providerMeta?.displayName ?? resolved.providerId,
+        model: resolved.model,
+        isLocal: providerMeta?.isLocal ?? false,
+        ready: false,
+      };
+    } catch {
+      return {
+        provider: 'unknown',
+        model: 'unknown',
+        isLocal: false,
+        ready: false,
+      };
     }
-
-    const providerMeta = getProviderMeta(effectiveProvider);
-    const mismatch = !isModelCompatibleWithProvider(effectiveModel, effectiveProvider);
-    const inferredProvider = mismatch ? inferProviderFromModel(effectiveModel) : null;
-    const inferredMeta = inferredProvider ? getProviderMeta(inferredProvider) : null;
-
-    return {
-      provider: effectiveProvider,
-      providerDisplayName: providerMeta?.displayName ?? effectiveProvider,
-      model: effectiveModel,
-      isLocal: providerMeta?.isLocal ?? false,
-      mismatch,
-      mismatchReason: mismatch
-        ? `Model "${effectiveModel}" looks like ${inferredMeta?.displayName ?? inferredProvider} but provider is set to ${providerMeta?.displayName ?? effectiveProvider}. Open Settings to fix.`
-        : undefined,
-      ready: false,
-    };
   }
 
   private decorateInitError(raw: string): string {
@@ -391,11 +376,11 @@ export class AgentHost {
     if (/Cannot find module/.test(raw)) {
       hint =
         "\n\nThis usually means the provider SDK isn't installed. " +
-        'Open Clodcode Settings and pick a different provider, or check the logs for details.';
+        'Open Oboto VS Settings and pick a different provider, or check the logs for details.';
     } else if (/API key|apiKey/i.test(raw)) {
-      hint = '\n\nConfigure your API key: Command Palette → "Clodcode: Open Settings".';
+      hint = '\n\nConfigure your API key: Command Palette → "Oboto VS: Open Settings".';
     } else if (/Mismatch:/i.test(raw)) {
-      hint = '\n\nOpen Clodcode Settings and make sure the provider and model match.';
+      hint = '\n\nOpen Oboto VS Settings and make sure the provider and model match.';
     } else if (/ECONNREFUSED|fetch failed/i.test(raw)) {
       hint =
         "\n\nCan't reach the server. Check that the base URL is correct and the service is running.";
@@ -405,19 +390,19 @@ export class AgentHost {
 
   private decorateRuntimeError(raw: string): string {
     if (/Compilation failed for "triage"/i.test(raw)) {
+      const triage = this.settings.routing?.triage;
+      const triageLabel = triage ? `${triage.providerId}/${triage.model || 'default'}` : 'triage model';
       return (
-        `The triage step failed because the local model ` +
-        `("${this.settings.localModel}" on ${this.settings.localProvider}) ` +
+        `The triage step failed because the triage model (${triageLabel}) ` +
         `couldn't produce valid structured JSON.\n\n` +
-        `Fix: Open Clodcode Settings and **uncheck "Enable dual-LLM triage"**. ` +
-        `Everything will then run through your remote model. ` +
-        `You can also try a stronger local model that supports JSON mode (e.g. llama3.1:8b, qwen2.5-coder:7b).`
+        `Fix: Open Oboto Settings and **uncheck "Enable dual-LLM triage"**, ` +
+        `or assign a stronger model to the Triage role.`
       );
     }
     if (/Compilation failed/i.test(raw)) {
       return (
         `${raw}\n\nThis usually means the LLM returned text that didn't match the expected JSON schema. ` +
-        `Try a different model or disable dual-LLM triage in Clodcode Settings.`
+        `Try a different model or disable dual-LLM triage in Oboto VS Settings.`
       );
     }
     return raw;

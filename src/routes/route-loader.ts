@@ -17,7 +17,7 @@ export interface RouteEntry {
 const ROUTE_FILE_NAMES = ['route.js', 'route.mjs'];
 
 export function routesDir(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.clodcode', 'routes');
+  return path.join(workspaceRoot, '.obotovs', 'routes');
 }
 
 function parseSegment(part: string): Segment {
@@ -32,7 +32,7 @@ function parseSegment(part: string): Segment {
   return { kind: 'static', value: part };
 }
 
-/** Walks `.clodcode/routes/` and returns every routable file. */
+/** Walks `.obotovs/routes/` and returns every routable file. */
 export function scanRoutes(workspaceRoot: string): RouteEntry[] {
   const root = routesDir(workspaceRoot);
   if (!fs.existsSync(root)) return [];

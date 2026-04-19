@@ -8,13 +8,14 @@ import { ChatPanel } from './vscode-integration/chat-panel';
 import { Orchestrator } from './agent/orchestrator';
 import { SessionStore } from './agent/session-store';
 import { getSettings, onSettingsChanged } from './config/settings';
+import { migrateSettingsIfNeeded, autoDetectProviders } from './config/settings-migration';
 import { logger } from './shared/logger';
 import { currentWindowId, registerWindow, unregisterWindow } from './shared/window-id';
 
 export async function activate(context: vscode.ExtensionContext) {
   // 1. Initialize the dedicated output channel for logging FIRST
   //    so any later errors are captured.
-  const outputChannel = vscode.window.createOutputChannel('Clodcode');
+  const outputChannel = vscode.window.createOutputChannel('Oboto');
   logger.init(outputChannel);
   context.subscriptions.push(outputChannel);
 
@@ -24,7 +25,7 @@ export async function activate(context: vscode.ExtensionContext) {
   registerWindow();
   context.subscriptions.push({ dispose: () => unregisterWindow() });
 
-  logger.info('Activating Clodcode extension', {
+  logger.info('Activating Oboto VS extension', {
     version: context.extension.packageJSON.version,
     vscodeVersion: vscode.version,
     windowId,
@@ -60,10 +61,11 @@ export async function activate(context: vscode.ExtensionContext) {
     //    configured something else.
     statusBar = new StatusBar();
     const initialSettings = getSettings();
+    const execRoute = initialSettings.routing?.executor;
     statusBar.updateModel({
-      provider: initialSettings.remoteProvider,
-      model: initialSettings.remoteModel,
-      isLocal: false,
+      provider: execRoute?.providerId ?? 'oboto',
+      model: execRoute?.model ?? '',
+      isLocal: execRoute?.providerId === 'oboto',
     });
     context.subscriptions.push(statusBar);
     logger.info('Status bar created');
@@ -81,13 +83,19 @@ export async function activate(context: vscode.ExtensionContext) {
     logger.error('Failed to create session store', err);
   }
 
-  // 5. Read settings
+  // 5. Migrate old settings format if needed, then auto-detect providers from env vars
+  try {
+    await migrateSettingsIfNeeded();
+    await autoDetectProviders();
+  } catch (err) {
+    logger.warn('Settings migration/auto-detect failed', err);
+  }
+
+  // 6. Read settings
   const settings = getSettings();
   logger.info('Loaded settings', {
-    localProvider: settings.localProvider,
-    localModel: settings.localModel,
-    remoteProvider: settings.remoteProvider,
-    remoteModel: settings.remoteModel,
+    routing: settings.routing,
+    providers: Object.keys(settings.providers),
     permissionMode: settings.permissionMode,
   });
 
@@ -142,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
 
-  // Register Clodcode Explorer
+  // Register Oboto VS Explorer
   try {
     const explorerProvider = new ExplorerProvider();
     if (orchestrator) {
@@ -154,7 +162,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const treeView = explorerProvider.createTreeView();
     context.subscriptions.push(treeView, explorerProvider);
     context.subscriptions.push(
-      vscode.commands.registerCommand('clodcode.refreshExplorer', () => explorerProvider.refresh())
+      vscode.commands.registerCommand('obotovs.refreshExplorer', () => explorerProvider.refresh())
     );
     logger.info('Explorer Provider registered');
   } catch (err) {
@@ -176,14 +184,14 @@ export async function activate(context: vscode.ExtensionContext) {
       onSettingsChanged((newSettings) => {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
+          const exec = newSettings.routing?.executor;
           logger.info('Settings changed, recreating agent', {
-            remoteProvider: newSettings.remoteProvider,
-            remoteModel: newSettings.remoteModel,
+            executor: exec ? `${exec.providerId}/${exec.model ?? ''}` : 'unset',
           });
           statusBar?.updateModel({
-            provider: newSettings.remoteProvider,
-            model: newSettings.remoteModel,
-            isLocal: false,
+            provider: exec?.providerId ?? 'oboto',
+            model: exec?.model ?? '',
+            isLocal: exec?.providerId === 'oboto',
           });
           try {
             await orchestrator?.recreateAgent(newSettings);

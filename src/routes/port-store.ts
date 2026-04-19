@@ -15,16 +15,16 @@ export interface PortRegistry {
   servers: PortEntry[];
 }
 
-function clodcodeDir(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.clodcode');
+function obotovsDir(workspaceRoot: string): string {
+  return path.join(workspaceRoot, '.obotovs');
 }
 
 function portFile(workspaceRoot: string): string {
-  return path.join(clodcodeDir(workspaceRoot), 'port.json');
+  return path.join(obotovsDir(workspaceRoot), 'port.json');
 }
 
 function lockFile(workspaceRoot: string): string {
-  return path.join(clodcodeDir(workspaceRoot), 'port.lock');
+  return path.join(obotovsDir(workspaceRoot), 'port.lock');
 }
 
 // ── File lock (synchronous, 50ms × 40 = 2s max) ─────────────────────
@@ -37,7 +37,7 @@ function sleepSync(ms: number): void {
 }
 
 function withLock<T>(workspaceRoot: string, fn: () => T): T {
-  const dir = clodcodeDir(workspaceRoot);
+  const dir = obotovsDir(workspaceRoot);
   try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
   const lock = lockFile(workspaceRoot);
 
@@ -90,7 +90,7 @@ function readRegistryRaw(workspaceRoot: string): PortRegistry {
 }
 
 function writeRegistryAtomic(workspaceRoot: string, reg: PortRegistry): void {
-  const dir = clodcodeDir(workspaceRoot);
+  const dir = obotovsDir(workspaceRoot);
   try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
   const finalPath = portFile(workspaceRoot);
   const tmpPath = finalPath + '.tmp';

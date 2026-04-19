@@ -13,7 +13,7 @@ import { postMessage } from './vscode-api';
 import type { ExtToWebviewMessage, PickerProviderInfo } from '../../src/shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../../src/shared/message-types';
 
-const PANEL_AGENT_ID = (typeof window !== 'undefined' && (window as any).__CLODCODE_PANEL_AGENT_ID__) as string | undefined;
+const PANEL_AGENT_ID = (typeof window !== 'undefined' && (window as any).__OBOTOVS_PANEL_AGENT_ID__) as string | undefined;
 const isPanelMode = !!PANEL_AGENT_ID;
 
 export default function App() {
@@ -282,7 +282,7 @@ export default function App() {
           }`} />
           <h1 className="text-sm font-semibold tracking-wide text-zinc-100 flex items-center gap-2 min-w-0">
             <Terminal size={16} className="text-zinc-400 shrink-0" />
-            Clodcode
+            Obotovs
             {viewingBackground && (
               <>
                 <span className="text-zinc-600 mx-1">/</span>

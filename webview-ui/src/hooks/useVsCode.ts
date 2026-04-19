@@ -15,7 +15,7 @@ import type {
  */
 export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
   useEffect(() => {
-    const panelAgentId = (window as any).__CLODCODE_PANEL_AGENT_ID__ as string | undefined;
+    const panelAgentId = (window as any).__OBOTOVS_PANEL_AGENT_ID__ as string | undefined;
     postMessage({ type: 'ready', panelAgentId });
     return onMessage(onExtMessage);
   }, [onExtMessage]);

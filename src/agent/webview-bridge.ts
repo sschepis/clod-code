@@ -420,14 +420,8 @@ export class WebviewBridge {
       }
 
       case 'tool_round':
-        this.appendEvent(agentId, {
-          id: `narrative-${Date.now()}-${rand()}`,
-          role: 'narrative',
-          content: event.narrative,
-          iteration: event.iteration,
-          totalToolCalls: event.totalToolCalls,
-          timestamp: now(),
-        });
+        // Suppressed: narrative events ("Just read file data...") added noise
+        // between every tool call. The individual ToolBlock entries are sufficient.
         break;
 
       case 'turn_complete':

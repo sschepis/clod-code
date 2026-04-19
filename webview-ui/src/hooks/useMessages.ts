@@ -49,7 +49,7 @@ const DEFAULT_SLICE: AgentUiSlice = {
   mode: 'act',
 };
 
-const PANEL_AGENT_ID = (typeof window !== 'undefined' && (window as any).__CLODCODE_PANEL_AGENT_ID__) as string | undefined;
+const PANEL_AGENT_ID = (typeof window !== 'undefined' && (window as any).__OBOTOVS_PANEL_AGENT_ID__) as string | undefined;
 const INITIAL_FOCUSED_ID = PANEL_AGENT_ID ?? FOREGROUND_AGENT_ID;
 
 const INITIAL_STATE: AppState = {
@@ -69,7 +69,7 @@ const INITIAL_STATE: AppState = {
     { name: 'help', summary: 'Show available commands', icon: 'help' },
     { name: 'diff', summary: 'Show git diff', icon: 'git' },
     { name: 'diagnostics', summary: 'Show workspace errors', icon: 'warning' },
-    { name: 'peers', summary: 'List peer Clodcode windows', icon: 'cpu' },
+    { name: 'peers', summary: 'List peer Oboto windows', icon: 'cpu' },
   ],
   peers: [],
   outboundDispatches: [],

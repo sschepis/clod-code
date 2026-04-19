@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ThoughtBlock } from './ThoughtBlock';
 import { ToolBlock } from './ToolBlock';
-import { ToolNarrative } from './ToolNarrative';
+
 import { PermissionPrompt } from './PermissionPrompt';
 import { QuestionPrompt } from './QuestionPrompt';
 import { SecretPrompt } from './SecretPrompt';
@@ -86,14 +86,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         );
       case 'narrative':
-        return (
-          <ToolNarrative
-            key={event.id || index}
-            content={event.content}
-            iteration={event.iteration}
-            totalToolCalls={event.totalToolCalls}
-          />
-        );
+        return null;
       case 'system':
         return (
           <div key={event.id || index} className="px-6 py-3 text-xs text-zinc-500 italic border-b border-zinc-800/30 fade-in">
@@ -166,7 +159,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         <div className="flex h-full items-center justify-center text-zinc-600 space-y-4 flex-col">
           <div className="text-center space-y-3">
             <div className="text-3xl">&#x2726;</div>
-            <p className="text-sm font-medium text-zinc-400">Clodcode</p>
+            <p className="text-sm font-medium text-zinc-400">Oboto</p>
             <p className="text-xs text-zinc-600 max-w-[280px]">
               Multi-LLM AI coding assistant. Type a message, paste code, or use /commands to get started.
             </p>

@@ -109,8 +109,7 @@ function copyPackage(pkgName) {
  * Read a package's production dependencies and copy them too (flat into DIST_NM).
  * Only goes 2 levels deep to avoid exponential blowup.
  */
-function copyTransitiveDeps(pkgName, visited = new Set(), depthLeft = 2) {
-  if (depthLeft <= 0) return;
+function copyTransitiveDeps(pkgName, visited = new Set()) {
   if (visited.has(pkgName)) return;
   visited.add(pkgName);
 
@@ -132,7 +131,7 @@ function copyTransitiveDeps(pkgName, visited = new Set(), depthLeft = 2) {
     if (subSrc) {
       const destPath = path.join(DIST_NM, subDep);
       copyRecursive(subSrc, destPath);
-      copyTransitiveDeps(subDep, visited, depthLeft - 1);
+      copyTransitiveDeps(subDep, visited);
     }
   }
 }

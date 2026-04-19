@@ -50,7 +50,7 @@ export interface ToolTreeDeps {
   route: RouteToolDeps;
   /** Workspace-scoped skill manager (shared by foreground + background). */
   skill: SkillToolDeps;
-  /** Workspace-scoped peer manager — lets the AI see other Clodcode windows. */
+  /** Workspace-scoped peer manager — lets the AI see other Oboto VS windows. */
   peer: PeerToolDeps;
   /** Hierarchical memory (conversation/project/global). Optional for tests. */
   memory?: MemoryToolDeps;
@@ -69,7 +69,7 @@ export interface ToolTreeDeps {
 export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
   const session = new SessionManager();
 
-  const builder = TreeBuilder.create('root', 'Clodcode coding assistant tool tree')
+  const builder = TreeBuilder.create('root', 'Oboto VS coding assistant tool tree')
     // ── File operations ────────────────────────────────────────────
     .branch('file', 'File operations — read, write, edit, list', (file) => {
       file
@@ -162,7 +162,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           description: 'Send a command to the VS Code integrated terminal.',
           optionalArgs: {
             cmd: { type: 'string', description: 'Command to send (empty = just focus terminal)' },
-            name: { type: 'string', description: 'Terminal name', default: 'Clodcode' },
+            name: { type: 'string', description: 'Terminal name', default: 'Obotovs' },
           },
           handler: createTerminalHandler(),
         });
@@ -274,7 +274,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── Skills (workspace-authored markdown skill files) ───────────
-    .branch('skill', 'List and load workspace skills from .clodcode/skills/*.md', (s) => {
+    .branch('skill', 'List and load workspace skills from .obotovs/skills/*.md', (s) => {
       s
         .leaf('list', {
           description: 'List all skills available in this workspace. Each skill has a name, a short description, and optionally a hint about when it applies. Use this to discover what domain-specific instructions the user has authored.',
@@ -293,7 +293,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     .branch('surface', [
       'Create, update, delete, list, and open surface HTML pages.',
       '',
-      'Surfaces are self-contained HTML files stored at .clodcode/surfaces/<name>.html and rendered in VS Code webview panels.',
+      'Surfaces are self-contained HTML files stored at .obotovs/surfaces/<name>.html and rendered in VS Code webview panels.',
       'They are ideal for dashboards, visualizations, forms, documentation viewers, or any interactive UI the user needs.',
       '',
       'HOW TO WRITE A SURFACE:',
@@ -303,9 +303,9 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       '  • Tailwind CSS: <script src="https://cdn.tailwindcss.com"></script>',
       '  • React + ReactDOM (UMD): <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>',
       '  • Chart.js, D3, Mermaid, Marked, etc. via unpkg/cdnjs/jsdelivr.',
-      '- To call local API routes from a surface, use the global `window.__CLODCODE_ROUTES_URL__`.',
+      '- To call local API routes from a surface, use the global `window.__OBOTOVS_ROUTES_URL__`.',
       '  This is injected automatically and points to the local route server (e.g. http://localhost:PORT).',
-      '  Example: fetch(`${window.__CLODCODE_ROUTES_URL__}/api/data`).then(r => r.json())',
+      '  Example: fetch(`${window.__OBOTOVS_ROUTES_URL__}/api/data`).then(r => r.json())',
       '',
       'AUTO-REFRESH BEHAVIOR:',
       '- When you call surface/create, the panel opens automatically (if surfacesAutoOpen is enabled).',
@@ -315,14 +315,14 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     ].join('\n'), (s) => {
       s
         .leaf('list', {
-          description: 'List all surfaces in .clodcode/surfaces/. Returns name + file path for each.',
+          description: 'List all surfaces in .obotovs/surfaces/. Returns name + file path for each.',
           handler: createSurfaceListHandler(deps.surface),
         })
         .leaf('create', {
           description: [
-            'Create a new surface HTML page at .clodcode/surfaces/<name>.html and open it in a webview panel.',
+            'Create a new surface HTML page at .obotovs/surfaces/<name>.html and open it in a webview panel.',
             'Provide a complete HTML document. CDN scripts (React, Tailwind, Chart.js, etc.) are allowed.',
-            'Use window.__CLODCODE_ROUTES_URL__ to fetch data from local routes.',
+            'Use window.__OBOTOVS_ROUTES_URL__ to fetch data from local routes.',
             'The panel opens automatically after creation.',
           ].join(' '),
           requiredArgs: {
@@ -357,11 +357,11 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
 
     // ── Routes (Next.js App Router-style API endpoints) ────────────
     .branch('route', [
-      'Create, update, delete, list API routes served from .clodcode/routes/.',
+      'Create, update, delete, list API routes served from .obotovs/routes/.',
       '',
-      'Routes are ES-module files at .clodcode/routes/<path>/route.js following the Next.js App Router convention.',
+      'Routes are ES-module files at .obotovs/routes/<path>/route.js following the Next.js App Router convention.',
       'A local HTTP server starts automatically when the first route is created and serves all routes.',
-      'Surfaces can call routes via window.__CLODCODE_ROUTES_URL__ (injected into every surface).',
+      'Surfaces can call routes via window.__OBOTOVS_ROUTES_URL__ (injected into every surface).',
       '',
       'ROUTE FILE FORMAT:',
       '- Export named functions for each HTTP method: GET, POST, PUT, DELETE, PATCH.',
@@ -400,7 +400,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         })
         .leaf('create', {
           description: [
-            'Create a route file at .clodcode/routes/<path>/route.js.',
+            'Create a route file at .obotovs/routes/<path>/route.js.',
             'Export named handler functions: GET, POST, PUT, DELETE, PATCH.',
             'Handler signature: async (request, { params }) => Response | object.',
             'Dynamic segments use [brackets]: "users/[id]" makes params.id available.',
@@ -481,10 +481,10 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── UI control (nut.js: screen + mouse + keyboard) ────────────
-    .branch('ui', 'Capture the screen and drive mouse/keyboard via nut.js. Disabled by default — user must enable "Clodcode: UI Control Enabled" in Settings.', (u) => {
+    .branch('ui', 'Capture the screen and drive mouse/keyboard via nut.js. Disabled by default — user must enable "Oboto VS: UI Control Enabled" in Settings.', (u) => {
       u
         .leaf('screenshot', {
-          description: 'Capture the screen (or a region) and save a PNG to .clodcode/screenshots/. Returns the absolute path and a markdown image embed so the user can see the result inline.',
+          description: 'Capture the screen (or a region) and save a PNG to .obotovs/screenshots/. Returns the absolute path and a markdown image embed so the user can see the result inline.',
           optionalArgs: {
             name: { type: 'string', description: 'Filename (without extension). Default: timestamped.' },
             x: { type: 'number', description: 'Region top-left X (optional; all four required for region capture).' },
@@ -543,10 +543,10 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── VS Code commands ──────────────────────────────────────────
-    .branch('peer', 'Coordinate with other Clodcode windows on this workspace', (p) => {
+    .branch('peer', 'Coordinate with other Oboto VS windows on this workspace', (p) => {
       p
         .leaf('list', {
-          description: 'List peer Clodcode windows (other VS Code windows running Clodcode on this workspace) and the agents running in each. Includes diagnostic info when no peers are found. Read-only — safe to call any time.',
+          description: 'List peer Oboto VS windows (other VS Code windows running Oboto VS on this workspace) and the agents running in each. Includes diagnostic info when no peers are found. Read-only — safe to call any time.',
           handler: createPeerListHandler(deps.peer),
         })
         .leaf('debug', {
@@ -584,7 +584,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           handler: createPeerStatusHandler(deps.peer),
         })
         .leaf('ask', {
-          description: 'Ask a multiple-choice question of a peer window\'s user. Blocks up to 90s waiting for their answer; after that it returns the rpc_id so you can keep polling via peer/ask-status. Use this when you need input the user currently at another Clodcode window can provide better than your user.',
+          description: 'Ask a multiple-choice question of a peer window\'s user. Blocks up to 90s waiting for their answer; after that it returns the rpc_id so you can keep polling via peer/ask-status. Use this when you need input the user currently at another Oboto VS window can provide better than your user.',
           requiredArgs: {
             peer_id: { type: 'string', description: 'Target peer window id (prefix >= 4 chars)' },
             question: { type: 'string', description: 'The question to show the peer user' },
@@ -667,7 +667,11 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       a
         .leaf('spawn', {
           description:
-            'Spawn a background agent to run a task. By default returns immediately with an instance_id — pass await=true to block until the agent finishes and return its final output.',
+            'Spawn a background agent to run a task in parallel. ' +
+            'Use this when you want to delegate a subtask while continuing your own work — ' +
+            'e.g., kick off a test run, a code search, or a file refactor while you work on something else. ' +
+            'Returns immediately with an instance_id (use agent/collect or agent/query to get results later). ' +
+            'Pass await=true to block until the agent finishes and return its result directly.',
           requiredArgs: {
             task: { type: 'string', description: 'The task prompt the background agent should execute' },
           },
@@ -716,7 +720,12 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           handler: createAgentCancelHandler(agentDeps),
         })
         .leaf('batch', {
-          description: 'Spawn multiple background agents and wait for all to complete. Use this when you have independent subtasks that can run in parallel. Returns all results in one response. Default mode is parallel. Sequential mode runs tasks one after another.',
+          description:
+            'Spawn multiple background agents and wait for all to complete. ' +
+            'This is your primary parallelism tool — reach for it whenever a task can be split into 2+ independent pieces. ' +
+            'Examples: read/analyze multiple files, refactor several independent modules, run tests + lint simultaneously, ' +
+            'search for different patterns across the codebase. ' +
+            'Returns all results in one response. Default mode is parallel; sequential mode runs tasks one after another.',
           requiredArgs: {
             tasks: { type: 'json', description: 'Array of {task, label?, model?, provider?} objects' },
           },
@@ -728,7 +737,10 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           handler: createAgentBatchHandler(agentDeps),
         })
         .leaf('collect', {
-          description: 'Wait for multiple previously-spawned agents to complete and return all their results. Use after spawning agents asynchronously when you need their results before proceeding.',
+          description:
+            'Wait for multiple previously-spawned agents to complete and return all their results. ' +
+            'Use after fire-and-forget agent/spawn calls when you are ready to use their results. ' +
+            'Typical pattern: spawn 3 agents → do your own work → agent/collect all 3 before synthesizing.',
           requiredArgs: {
             instance_ids: { type: 'json', description: 'Array of agent instance IDs to await' },
           },

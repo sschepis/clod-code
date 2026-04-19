@@ -14,7 +14,7 @@
 import type { Router, SessionManager } from '@sschepis/swiss-army-tool';
 import type { AgentRuntime } from '@sschepis/as-agent';
 
-import type { ClodcodeSettings, PromptRole } from '../config/settings';
+import type { ObotovsSettings, PromptRole } from '../config/settings';
 import type {
   AgentStatus,
   AgentSummary,
@@ -41,7 +41,7 @@ export interface SpawnOpts {
   label?: string;
   /** Shared batch ID for agents spawned together via agent/batch. */
   batchId?: string;
-  /** Prompt routing role — selects provider/model from promptRouting settings. */
+  /** Routing role — selects provider/model from the routing config. */
   role?: PromptRole;
 }
 
@@ -57,7 +57,7 @@ export interface SpawnFailure {
 }
 
 export interface AgentManagerConfig {
-  settings: ClodcodeSettings;
+  settings: ObotovsSettings;
   agentRuntime?: AgentRuntime;
   /**
    * Factory producing a fresh tool tree for each host. Each host has its
@@ -104,7 +104,7 @@ export interface CompletionResult {
 
 export class AgentManager {
   private instances = new Map<string, InstanceRecord>();
-  private settings: ClodcodeSettings;
+  private settings: ObotovsSettings;
   private agentRuntime?: AgentRuntime;
   private toolTreeFactory: AgentManagerConfig['toolTreeFactory'];
   private bridge: WebviewBridge;
@@ -127,7 +127,7 @@ export class AgentManager {
     try { this.onSummariesChanged?.(); } catch { /* best-effort */ }
   }
 
-  updateSettings(newSettings: ClodcodeSettings): void {
+  updateSettings(newSettings: ObotovsSettings): void {
     this.settings = newSettings;
   }
 
@@ -226,7 +226,7 @@ export class AgentManager {
     return depth < maxDepth;
   }
 
-  async recreateForeground(newSettings: ClodcodeSettings): Promise<void> {
+  async recreateForeground(newSettings: ObotovsSettings): Promise<void> {
     this.updateSettings(newSettings);
     const record = this.instances.get(FOREGROUND_AGENT_ID);
     if (!record) return;
@@ -249,7 +249,7 @@ export class AgentManager {
         error:
           `Cannot spawn: ${runningBackground} background agents already running ` +
           `(limit: ${limit}). Use agent/list to see them, agent/cancel to free slots, ` +
-          `or raise "clodcode.maxConcurrentAgents" in settings.`,
+          `or raise "obotovs.maxConcurrentAgents" in settings.`,
       };
     }
 
@@ -274,7 +274,7 @@ export class AgentManager {
         ok: false,
         error:
           `Maximum agent nesting depth (${maxDepth}) exceeded. ` +
-          `This agent is at depth ${lineage.size}. Raise "clodcode.maxAgentNestingDepth" to allow deeper nesting.`,
+          `This agent is at depth ${lineage.size}. Raise "obotovs.maxAgentNestingDepth" to allow deeper nesting.`,
       };
     }
 
@@ -305,9 +305,17 @@ export class AgentManager {
     }
 
     // ── Build the instance settings (may override model) ─────────────
-    const instanceSettings: ClodcodeSettings = { ...this.settings };
-    if (opts.model?.provider) instanceSettings.remoteProvider = opts.model.provider;
-    if (opts.model?.name) instanceSettings.remoteModel = opts.model.name;
+    const instanceSettings: ObotovsSettings = { ...this.settings };
+    if (opts.model?.provider || opts.model?.name) {
+      const currentExec = instanceSettings.routing?.executor;
+      instanceSettings.routing = {
+        ...instanceSettings.routing,
+        executor: {
+          providerId: opts.model?.provider ?? currentExec?.providerId ?? 'oboto',
+          model: opts.model?.name ?? currentExec?.model,
+        },
+      };
+    }
 
     // ── Construct host ────────────────────────────────────────────────
     this.counter += 1;
@@ -387,7 +395,7 @@ export class AgentManager {
 
       logger.info(`Agent "${agentId}" spawned`, {
         task: opts.task.slice(0, 100),
-        model: `${instanceSettings.remoteProvider}/${instanceSettings.remoteModel}`,
+        model: `${instanceSettings.routing?.executor?.providerId ?? 'oboto'}/${instanceSettings.routing?.executor?.model ?? ''}`,
         budgetUsd,
         timeoutMs,
       });
