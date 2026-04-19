@@ -94,6 +94,12 @@ export class Orchestrator {
   private objectsWatcher?: vscode.FileSystemWatcher;
   private objectsBroadcastTimer?: NodeJS.Timeout;
   private memoryChangeUnsubscribe?: () => void;
+  private panelRenamer?: (panelId: string, title: string) => void;
+  private chatPanelOpener?: () => void;
+  private summaryListeners: Array<() => void> = [];
+  private uiEventsSaveTimers = new Map<string, NodeJS.Timeout>();
+  private foregroundReady = false;
+  private pendingSidebarSync = false;
 
   constructor(
     sidebar: SidebarProvider,
@@ -196,6 +202,9 @@ export class Orchestrator {
       onSummariesChanged: () => {
         this.peerManager.notifyLocalAgentsChanged();
         this.scheduleObjectsBroadcast();
+        for (const cb of this.summaryListeners) {
+          try { cb(); } catch { /* best-effort */ }
+        }
       },
       onAgentSpawned: (agentId, host, parentId) => {
         if (this.memoryManager) {
@@ -210,7 +219,60 @@ export class Orchestrator {
     // Handle messages from webview
     sidebar.onMessage((msg) => this.handleWebviewMessage(msg));
 
+    // Debounced UI events save — fires on every slice change (token, event, tool status, etc.)
+    this.bridge.onSliceChanged((agentId) => this.scheduleUiEventsSave(agentId));
+
     this.installObjectsWatcher();
+  }
+
+  private replaySidebarSync(): void {
+    const focused = this.bridge.getFocus();
+    this.bridge.sendSync(focused);
+    this.broadcastObjects();
+    this.bridge.post({
+      type: 'peers_update',
+      peers: this.peerManager.listPeers().map((p) => ({
+        windowId: p.windowId,
+        pid: p.pid,
+        startedAt: p.startedAt,
+        lastSeen: p.lastSeen,
+        agents: p.agents,
+      })),
+    });
+    this.bridge.post({
+      type: 'outbound_dispatches_update',
+      dispatches: this.peerManager.listOutbound().map((o) => ({
+        rpcId: o.rpcId,
+        peerWindowId: o.peerWindowId,
+        label: o.label,
+        task: o.task,
+        status: o.status,
+        sentAt: o.sentAt,
+        completedAt: o.completedAt,
+        result: o.result,
+        error: o.error,
+        reason: o.reason,
+      })),
+    });
+  }
+
+  private scheduleUiEventsSave(agentId: string): void {
+    const existing = this.uiEventsSaveTimers.get(agentId);
+    if (existing) clearTimeout(existing);
+    this.uiEventsSaveTimers.set(agentId, setTimeout(() => {
+      this.uiEventsSaveTimers.delete(agentId);
+      const slice = this.bridge.getSlice(agentId);
+      if (!slice) return;
+      if (agentId === FOREGROUND_AGENT_ID) {
+        this.sessionStore.saveUiEvents(slice.events).catch(err => {
+          logger.warn('Debounced UI events save failed', err);
+        });
+      } else if (this.manager.isInteractive(agentId)) {
+        this.sessionStore.savePanelUiEvents(agentId, slice.events).catch(err => {
+          logger.warn(`Debounced panel UI events save failed for ${agentId}`, err);
+        });
+      }
+    }, 1000));
   }
 
   /** Exposed for the `clodcode.openSurface` command. */
@@ -492,6 +554,20 @@ export class Orchestrator {
   }
 
   dispose(): void {
+    // Flush any pending UI event saves immediately before tearing down
+    for (const [agentId, timer] of this.uiEventsSaveTimers.entries()) {
+      clearTimeout(timer);
+      const slice = this.bridge.getSlice(agentId);
+      if (slice) {
+        if (agentId === FOREGROUND_AGENT_ID) {
+          void this.sessionStore.saveUiEvents(slice.events);
+        } else if (this.manager.isInteractive(agentId)) {
+          void this.sessionStore.savePanelUiEvents(agentId, slice.events);
+        }
+      }
+    }
+    this.uiEventsSaveTimers.clear();
+
     void this.peerManager.stop();
     void this.routeManager.stop();
     this.surfaceManager.dispose();
@@ -510,6 +586,26 @@ export class Orchestrator {
   // ── Public accessors for ChatPanelManager ───────────────────────────
 
   getBridge(): WebviewBridge { return this.bridge; }
+
+  setPanelRenamer(renamer: (panelId: string, title: string) => void): void {
+    this.panelRenamer = renamer;
+  }
+
+  setChatPanelOpener(opener: () => void): void {
+    this.chatPanelOpener = opener;
+  }
+
+  getAgentSummaries(): import('../shared/message-types').AgentSummary[] {
+    return this.manager.listAll();
+  }
+
+  async cancelAgent(agentId: string): Promise<void> {
+    await this.manager.cancel(agentId, 'Cancelled from explorer');
+  }
+
+  onSummariesChanged(cb: () => void): void {
+    this.summaryListeners.push(cb);
+  }
 
   async createInteractiveAgent(panelId: string, label?: string): Promise<void> {
     const { router } = this.buildToolTreeFor(panelId);
@@ -536,10 +632,33 @@ export class Orchestrator {
     this.manager.registerInteractive(panelId, host);
     await host.initialize(session);
 
+    // Restore saved UI events into the bridge slice
+    try {
+      const savedEvents = await this.sessionStore.loadPanelUiEvents(panelId);
+      if (savedEvents && Array.isArray(savedEvents) && savedEvents.length > 0) {
+        const slice = this.bridge.getSlice(panelId);
+        if (slice) {
+          slice.events = savedEvents as any;
+        }
+      }
+    } catch (err) {
+      logger.warn(`Failed to load panel UI events for ${panelId}`, err);
+    }
+
+    // Agent is ready — push a full sync so the panel webview picks up the
+    // real model info and any restored session events.
+    this.bridge.sendSync(panelId, panelId);
+
     host.on((event) => {
       if (event.type === 'turn_complete') {
         const s = host.getSession();
         if (s) this.sessionStore.scheduleSavePanel(panelId, s);
+        const slice = this.bridge.getSlice(panelId);
+        if (slice) {
+          this.sessionStore.savePanelUiEvents(panelId, slice.events).catch(err => {
+            logger.warn(`Panel UI events save failed for ${panelId}`, err);
+          });
+        }
         if (this.memoryManager) {
           this.memoryManager.scheduleFlush();
           const mem = this.memoryManager.serializeConversation(panelId);
@@ -569,11 +688,7 @@ export class Orchestrator {
   }
 
   handlePanelMessage(panelId: string, msg: WebviewToExtMessage): void {
-    // Inject the panelId as agentId for messages that support it
-    const patched = { ...msg } as any;
-    if ('agentId' in patched || msg.type === 'submit' || msg.type === 'interrupt') {
-      patched.agentId = panelId;
-    }
+    const patched = { ...msg, agentId: panelId } as any;
     if (msg.type === 'ready') {
       patched.panelAgentId = panelId;
     }
@@ -607,6 +722,27 @@ export class Orchestrator {
 
     this.manager.registerForeground(host);
     await host.initialize(session);
+
+    // Restore saved UI events into the bridge slice so the chat shows history
+    try {
+      const savedEvents = await this.sessionStore.loadUiEvents();
+      if (savedEvents && Array.isArray(savedEvents) && savedEvents.length > 0) {
+        const slice = this.bridge.getSlice(FOREGROUND_AGENT_ID);
+        if (slice) {
+          slice.events = savedEvents as any;
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to load UI events', err);
+    }
+
+    // Foreground is now fully initialized with restored events.
+    // If the sidebar sent 'ready' before we got here, replay the sync now.
+    this.foregroundReady = true;
+    if (this.pendingSidebarSync) {
+      this.pendingSidebarSync = false;
+      this.replaySidebarSync();
+    }
 
     // Persist foreground session + conversation memory on turn_complete
     host.on((event) => {
@@ -767,6 +903,14 @@ export class Orchestrator {
         ? { manager: this.manager, callerId: () => agentId }
         : undefined;
 
+    const chatTitle = {
+      setTitle: (title: string) => {
+        this.bridge.updateSummary(agentId, { label: title });
+        this.bridge.post({ type: 'title_changed', agentId, title });
+        this.panelRenamer?.(agentId, title);
+      },
+    };
+
     return buildToolTree({
       ask,
       secret,
@@ -778,6 +922,8 @@ export class Orchestrator {
       memory: this.memoryManager
         ? { manager: this.memoryManager, callerId: () => agentId }
         : undefined,
+      chatTitle,
+      shell: { getShell: () => this.settings.shell },
     });
   }
 
@@ -787,39 +933,15 @@ export class Orchestrator {
     switch (msg.type) {
       case 'ready': {
         if (msg.panelAgentId) {
-          // Panel-specific sync: send that agent's slice with focus pinned to itself
           this.bridge.sendSync(msg.panelAgentId, msg.panelAgentId);
           break;
         }
-        // Sidebar sync: send focused slice + full state
-        const focused = this.bridge.getFocus();
-        this.bridge.sendSync(focused);
-        this.broadcastObjects();
-        this.bridge.post({
-          type: 'peers_update',
-          peers: this.peerManager.listPeers().map((p) => ({
-            windowId: p.windowId,
-            pid: p.pid,
-            startedAt: p.startedAt,
-            lastSeen: p.lastSeen,
-            agents: p.agents,
-          })),
-        });
-        this.bridge.post({
-          type: 'outbound_dispatches_update',
-          dispatches: this.peerManager.listOutbound().map((o) => ({
-            rpcId: o.rpcId,
-            peerWindowId: o.peerWindowId,
-            label: o.label,
-            task: o.task,
-            status: o.status,
-            sentAt: o.sentAt,
-            completedAt: o.completedAt,
-            result: o.result,
-            error: o.error,
-            reason: o.reason,
-          })),
-        });
+        // If foreground isn't initialized yet (events not restored), defer
+        if (!this.foregroundReady) {
+          this.pendingSidebarSync = true;
+          break;
+        }
+        this.replaySidebarSync();
         break;
       }
 
@@ -860,7 +982,14 @@ export class Orchestrator {
 
             // Spawn background agents concurrently
             for (const label of agentsToSpawn) {
-              this.manager.spawn({ task, label });
+              const spawnOpts: any = { task, label };
+              if (label.toLowerCase() === 'local') {
+                spawnOpts.model = {
+                  provider: this.settings.localProvider,
+                  name: this.settings.localModel
+                };
+              }
+              this.manager.spawn(spawnOpts);
             }
             break;
           }
@@ -882,9 +1011,33 @@ export class Orchestrator {
           const inputText = msg.mode === 'plan'
             ? wrapPlanMode(msg.text)
             : msg.text;
-          await host.submit(inputText);
+          
+          if (host.isProcessing && agentId === FOREGROUND_AGENT_ID) {
+            this.bridge.appendEvent(agentId, {
+              id: `sys-${Date.now()}`,
+              role: 'system',
+              content: 'Main agent is busy. Spawning a local background agent to handle this question concurrently.',
+              timestamp: now(),
+            });
+            this.manager.spawn({
+              task: inputText,
+              label: 'Secondary Query (Local)',
+              model: {
+                provider: this.settings.localProvider,
+                name: this.settings.localModel
+              }
+            });
+          } else {
+            await host.submit(inputText);
+          }
         } else {
           logger.warn(`Submit ignored — agent "${agentId}" not available`);
+          this.bridge.appendEvent(agentId, {
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: 'Agent is still initializing. Please wait a moment and try again.',
+            timestamp: now(),
+          });
         }
         break;
       }
@@ -996,21 +1149,39 @@ export class Orchestrator {
 
       case 'change_model': {
         const switchKey = resolveApiKey(msg.provider, undefined, this.settings.providerKeys);
-        this.settings = {
+        const newSettings: ClodcodeSettings = {
           ...this.settings,
           remoteProvider: msg.provider,
           remoteModel: msg.model,
           remoteApiKey: switchKey,
         };
-        await this.recreateAgent();
+        this.settings = newSettings;
+        const changeTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
+        if (changeTarget === FOREGROUND_AGENT_ID) {
+          await this.recreateAgent();
+        } else {
+          const rec = this.manager.get(changeTarget);
+          if (rec?.host) await rec.host.recreate(newSettings);
+        }
         break;
       }
 
-      case 'clear_session':
-        getUserPromptBridge().cancelAll();
-        this.bridge.clearSlice(FOREGROUND_AGENT_ID);
-        await this.recreateAgent();
+      case 'new_chat':
+        this.chatPanelOpener?.();
         break;
+
+      case 'clear_session': {
+        const clearId = msg.agentId ?? FOREGROUND_AGENT_ID;
+        getUserPromptBridge().cancelAll();
+        this.bridge.clearSlice(clearId);
+        if (clearId === FOREGROUND_AGENT_ID) {
+          await this.recreateAgent();
+        } else {
+          const rec = this.manager.get(clearId);
+          if (rec?.host) await rec.host.recreate(this.settings);
+        }
+        break;
+      }
 
       case 'revert': {
         const agentId = msg.agentId ?? FOREGROUND_AGENT_ID;
@@ -1019,6 +1190,42 @@ export class Orchestrator {
         const idx = slice.events.findIndex((e: SessionEvent) => e.id === msg.eventId);
         if (idx !== -1) {
           slice.events = slice.events.slice(0, idx + 1);
+        }
+        break;
+      }
+
+      case 'delete_event': {
+        const agentId = msg.agentId ?? FOREGROUND_AGENT_ID;
+        const slice = this.bridge.getSlice(agentId);
+        if (!slice) break;
+        slice.events = slice.events.filter((e: SessionEvent) => e.id !== msg.eventId);
+        break;
+      }
+
+      case 'edit_and_resubmit': {
+        const agentId = msg.agentId ?? FOREGROUND_AGENT_ID;
+        const slice = this.bridge.getSlice(agentId);
+        if (!slice) break;
+        // Revert to just before the edited message
+        const idx = slice.events.findIndex((e: SessionEvent) => e.id === msg.eventId);
+        if (idx !== -1) {
+          slice.events = slice.events.slice(0, idx);
+        }
+        // Resubmit with edited text
+        this.bridge.appendEvent(agentId, {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: msg.text,
+          timestamp: now(),
+        });
+        const host =
+          agentId === FOREGROUND_AGENT_ID
+            ? this.manager.getForeground()
+            : this.manager.get(agentId)?.host;
+        if (host) {
+          const mode = slice.mode;
+          const inputText = mode === 'plan' ? wrapPlanMode(msg.text) : msg.text;
+          await host.submit(inputText);
         }
         break;
       }
