@@ -37,7 +37,8 @@ export function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (e: any) {
+    if (e.code === 'EPERM') return true;
     return false;
   }
 }
