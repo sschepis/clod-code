@@ -631,6 +631,90 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Send a message from one agent to another in the same window.
+   * By default waits for the target to finish responding and returns the response.
+   */
+  private async sendInterAgentMessage(
+    callerId: string,
+    targetId: string,
+    message: string,
+    awaitResponse: boolean,
+  ): Promise<string> {
+    // Resolve caller label
+    const callerRec = this.manager.get(callerId);
+    const callerLabel = callerRec?.summary.label ?? callerId;
+
+    // Resolve target host
+    const targetHost =
+      targetId === FOREGROUND_AGENT_ID
+        ? this.manager.getForeground()
+        : this.manager.get(targetId)?.host;
+    if (!targetHost) {
+      throw new Error(`Agent "${targetId}" not found or not available.`);
+    }
+
+    const formattedMessage = `[Message from ${callerLabel}]: ${message}`;
+
+    // Record pre-submission event count so we can collect the response later
+    const slice = this.bridge.getSlice(targetId);
+    const preCount = slice?.events.length ?? 0;
+
+    // Add the message to the target's UI and submit it for processing
+    this.bridge.appendEvent(targetId, {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: formattedMessage,
+      timestamp: now(),
+    });
+
+    if (!awaitResponse) {
+      // Fire and forget — submit asynchronously
+      targetHost.submit(formattedMessage).catch((err) => {
+        logger.warn(`async inter-agent message delivery failed: ${err}`);
+      });
+      return `[SENT] Message delivered to ${targetId}. The target agent will process it asynchronously.`;
+    }
+
+    // Synchronous: wait for the target to finish responding
+    const responsePromise = new Promise<string>((resolve) => {
+      const timeout = setTimeout(() => {
+        unsub();
+        resolve('[TIMEOUT] Target agent did not respond within 120 seconds.');
+      }, 120_000);
+
+      const unsub = targetHost.on((event) => {
+        if (event.type === 'turn_complete') {
+          clearTimeout(timeout);
+          unsub();
+          // Collect assistant response events added after our message
+          const currentSlice = this.bridge.getSlice(targetId);
+          if (!currentSlice) {
+            resolve('[ERROR] Target agent slice not found.');
+            return;
+          }
+          const newEvents = currentSlice.events.slice(preCount + 1); // +1 to skip the UserEvent we added
+          const assistantTexts = newEvents
+            .filter((e) => e.role === 'assistant')
+            .map((e) => (e as any).content as string)
+            .filter(Boolean);
+          if (assistantTexts.length > 0) {
+            resolve(assistantTexts.join('\n'));
+          } else {
+            resolve('[INFO] Target agent processed the message but produced no text response.');
+          }
+        }
+      });
+    });
+
+    // Kick off processing (don't await — the event listener handles completion)
+    targetHost.submit(formattedMessage).catch((err) => {
+      logger.warn(`inter-agent message submit failed: ${err}`);
+    });
+
+    return responsePromise;
+  }
+
   dispose(): void {
     // Flush any pending UI event saves immediately before tearing down
     for (const [agentId, timer] of this.uiEventsSaveTimers.entries()) {
@@ -1004,7 +1088,12 @@ export class Orchestrator {
       surface: { manager: this.surfaceManager },
       route: { manager: this.routeManager },
       skill: { manager: this.skillManager },
-      peer: { manager: this.peerManager },
+      peer: {
+        manager: this.peerManager,
+        callerAgentId: agentId,
+        sendMessageToAgent: (callerId, targetId, message, awaitResponse) =>
+          this.sendInterAgentMessage(callerId, targetId, message, awaitResponse),
+      },
       memory: this.memoryManager
         ? { manager: this.memoryManager, callerId: () => agentId }
         : undefined,

@@ -400,6 +400,8 @@ export class AgentManager {
 
   // ── Query / list ────────────────────────────────────────────────────
 
+  getBridge() { return this.bridge; }
+
   get(agentId: string): InstanceRecord | undefined {
     return this.instances.get(agentId);
   }

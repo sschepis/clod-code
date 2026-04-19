@@ -9,7 +9,7 @@ import {
   createWorkspaceInfoHandler, createOpenFilesHandler,
   createTerminalHandler,
   createAskHandler, createSecretHandler,
-  createAgentSpawnHandler, createAgentQueryHandler,
+  createAgentSpawnHandler, createAgentQueryHandler, createAgentMessageHandler,
   createAgentListHandler, createAgentCancelHandler,
   createAgentBatchHandler, createAgentCollectHandler,
   createSurfaceListHandler, createSurfaceCreateHandler, createSurfaceUpdateHandler,
@@ -21,7 +21,8 @@ import {
   createUiMoveHandler, createUiClickHandler, createUiDragHandler,
   createUiTypeHandler, createUiPressHandler,
   createSkillListHandler, createSkillGetHandler,
-  createPeerListHandler, createPeerDebugHandler, createPeerDispatchHandler, createPeerStatusHandler,
+  createPeerListHandler, createPeerDebugHandler, createPeerSendHandler,
+  createPeerDispatchHandler, createPeerStatusHandler,
   createPeerAskHandler, createPeerAskStatusHandler, createPeerCancelHandler,
   createRefactorPipelineHandler, createRefactorRegexHandler,
   createMemoryAddHandler, createMemoryRecallHandler, createMemoryPromoteHandler,
@@ -552,6 +553,17 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           description: 'Dump comprehensive peer discovery diagnostic state: presence files, active windows, SSE connections, server port, and filtering details. Use this to diagnose why peers are not visible.',
           handler: createPeerDebugHandler(deps.peer),
         })
+        .leaf('send', {
+          description: 'Send a message to another agent in this window. By default waits synchronously for the target agent\'s response and returns it. Use peer/list first to see available agents. The message appears in the target agent\'s conversation with your name.',
+          requiredArgs: {
+            target_agent_id: { type: 'string', description: 'The target agent id (e.g. "foreground", "chat-abc123-1"). Prefix matching supported.' },
+            message: { type: 'string', description: 'The message to send' },
+          },
+          optionalArgs: {
+            async: { type: 'boolean', description: 'If true, send the message without waiting for a response (default: false — waits for response)' },
+          },
+          handler: createPeerSendHandler(deps.peer),
+        })
         .leaf('dispatch', {
           description: 'Send a task to a peer window. The peer\'s user must approve before an agent spawns there. Returns an rpc_id you can poll with peer/status. Use peer/list first to see available peers and get their id.',
           requiredArgs: {
@@ -676,6 +688,14 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             instance_id: { type: 'string', description: 'The id returned from agent/spawn' },
           },
           handler: createAgentQueryHandler(agentDeps),
+        })
+        .leaf('message', {
+          description: 'Send a message to a specific agent (e.g. another chat panel).',
+          requiredArgs: {
+            agent_id: { type: 'string', description: 'The target agent ID' },
+            message: { type: 'string', description: 'The message to send' }
+          },
+          handler: createAgentMessageHandler(agentDeps),
         })
         .leaf('list', {
           description: 'List background agents (running or complete).',

@@ -356,6 +356,11 @@ export class PeerManager {
     }
   }
 
+  /** Return agents running in THIS window (foreground + chat panels + background). */
+  listLocalAgents(): AgentSummary[] {
+    return this.getLocalAgents();
+  }
+
   /** Snapshot of all live peer windows (excluding self). */
   listPeers(): PeerSnapshot[] {
     const now = Date.now();

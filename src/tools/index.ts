@@ -14,6 +14,7 @@ export type { AskDeps } from './user-ask';
 export type { SecretDeps } from './user-secret';
 export { createAgentSpawnHandler } from './agent-spawn';
 export { createAgentQueryHandler } from './agent-query';
+export { createAgentMessageHandler } from './agent-message';
 export { createAgentListHandler } from './agent-list';
 export { createAgentCancelHandler } from './agent-cancel';
 export { createAgentBatchHandler } from './agent-batch';
@@ -49,6 +50,7 @@ export { createVscodeRunHandler, createVscodeListHandler } from './vscode-comman
 export {
   createPeerListHandler,
   createPeerDebugHandler,
+  createPeerSendHandler,
   createPeerDispatchHandler,
   createPeerStatusHandler,
   createPeerAskHandler,

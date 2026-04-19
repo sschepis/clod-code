@@ -476,7 +476,7 @@
     "dev": "concurrently \"webpack --mode development --watch\" \"cd webview-ui && npm run dev\"",
     "watch": "webpack --mode development --watch",
     "prepackage": "node scripts/prepackage.js",
-    "package": "npm run prepackage && vsce package --no-dependencies",
+    "package": "npm run build && npm run prepackage && vsce package --no-dependencies",
     "lint": "eslint src --ext ts",
     "test": "vitest run",
     "postinstall": "node scripts/patch-oboto-agent.js"

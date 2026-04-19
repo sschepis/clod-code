@@ -3,6 +3,16 @@ import { currentWindowId, getPresenceDirPath, listPresenceFilesRaw } from '../sh
 
 export interface PeerToolDeps {
   manager: PeerManager;
+  /** Send a message from one agent to another in the same window.
+   *  Returns the target agent's response text (sync) or a confirmation (async). */
+  sendMessageToAgent?: (
+    callerAgentId: string,
+    targetAgentId: string,
+    message: string,
+    awaitResponse: boolean,
+  ) => Promise<string>;
+  /** The agent ID that owns this tool instance. */
+  callerAgentId?: string;
 }
 
 function resolvePeer(mgr: PeerManager, peerId: string): PeerSnapshot | null {
@@ -28,69 +38,43 @@ function ageString(ms: number): string {
 export function createPeerListHandler(deps: PeerToolDeps) {
   return async (_kwargs: Record<string, unknown>): Promise<string> => {
     const peers = deps.manager.listPeers();
+    const localAgents = deps.manager.listLocalAgents();
     const selfId = currentWindowId();
-    if (peers.length === 0) {
-      // Include diagnostic info to help understand why no peers are visible
-      const presenceDir = getPresenceDirPath();
-      const rawFiles = listPresenceFilesRaw();
-      const otherFiles = rawFiles.filter((f) => !f.filename.startsWith(selfId.slice(0, 8)));
-      const lines: string[] = [
-        `No peer Clodcode windows on this workspace.`,
-        `This window: ${selfId.slice(0, 8)} (pid=${process.pid})`,
-        ``,
-        `Diagnostic info:`,
-        `  Presence dir: ${presenceDir ?? '(no workspace root)'}`,
-        `  Presence files found: ${rawFiles.length}`,
-      ];
-      for (const f of rawFiles) {
-        const isSelf = f.filename.startsWith(selfId.slice(0, 8));
-        const tag = isSelf ? ' (self)' : '';
-        if (f.content) {
-          lines.push(
-            `    ${f.filename}${tag}: pid=${f.content.pid}, port=${f.content.coordPort ?? 'none'}, alive=${f.alive}`
-          );
-        } else {
-          lines.push(`    ${f.filename}${tag}: ERROR ${f.error}`);
-        }
-      }
-      if (otherFiles.length === 0) {
-        lines.push(``);
-        lines.push(`No other windows detected. To use peer features, open the same`);
-        lines.push(`workspace folder in another VS Code window.`);
-      } else {
-        const withPort = otherFiles.filter((f) => f.content?.coordPort);
-        const withoutPort = otherFiles.filter((f) => f.content && !f.content.coordPort);
-        const dead = otherFiles.filter((f) => f.alive === false);
-        if (dead.length > 0) {
-          lines.push(``);
-          lines.push(`${dead.length} presence file(s) from dead processes detected.`);
-        }
-        if (withoutPort.length > 0) {
-          lines.push(``);
-          lines.push(`${withoutPort.length} window(s) found without coordPort — peer server may not have started.`);
-        }
-        if (withPort.length > 0) {
-          lines.push(``);
-          lines.push(`${withPort.length} window(s) found with coordPort but not in peer list.`);
-          lines.push(`This may indicate SSE connection issues. Use peer/debug for details.`);
-        }
-      }
-      return lines.join('\n');
-    }
-    const lines: string[] = [
-      `This window: ${selfId.slice(0, 8)}`,
-      `${peers.length} peer window${peers.length === 1 ? '' : 's'}:`,
-    ];
-    for (const p of peers) {
-      const running = p.agents.filter((a) => a.status === 'running').length;
-      lines.push(
-        `  ${p.windowId.slice(0, 8)}  pid=${p.pid}  port=${p.coordPort}  up=${ageString(p.startedAt)}  agents=${p.agents.length} (${running} running)`,
-      );
-      for (const a of p.agents) {
-        const label = a.id === 'foreground' ? 'foreground' : a.id.slice(0, 10);
-        lines.push(`    └ ${label}  [${a.status}]  ${a.label}`);
+    const lines: string[] = [];
+
+    // Always show this window's agents first
+    lines.push(`This window: ${selfId.slice(0, 8)} (pid=${process.pid})`);
+    if (localAgents.length === 0) {
+      lines.push(`  (no agents)`);
+    } else {
+      const running = localAgents.filter((a) => a.status === 'running').length;
+      lines.push(`  ${localAgents.length} agent${localAgents.length === 1 ? '' : 's'} (${running} running):`);
+      for (const a of localAgents) {
+        const label = a.id === 'foreground' ? 'foreground' : a.id;
+        lines.push(`    ${label}  [${a.status}]  ${a.label}`);
       }
     }
+
+    // Then show cross-window peers
+    if (peers.length > 0) {
+      lines.push(``);
+      lines.push(`${peers.length} peer window${peers.length === 1 ? '' : 's'}:`);
+      for (const p of peers) {
+        const running = p.agents.filter((a) => a.status === 'running').length;
+        lines.push(
+          `  ${p.windowId.slice(0, 8)}  pid=${p.pid}  port=${p.coordPort}  up=${ageString(p.startedAt)}  agents=${p.agents.length} (${running} running)`,
+        );
+        for (const a of p.agents) {
+          const label = a.id === 'foreground' ? 'foreground' : a.id;
+          lines.push(`    ${label}  [${a.status}]  ${a.label}`);
+        }
+      }
+    } else {
+      lines.push(``);
+      lines.push(`No peer windows. To coordinate across windows, open this same`);
+      lines.push(`workspace folder in another VS Code window.`);
+    }
+
     return lines.join('\n');
   };
 }
@@ -171,6 +155,47 @@ export function createPeerDebugHandler(deps: PeerToolDeps) {
       );
     }
     return lines.join('\n');
+  };
+}
+
+export function createPeerSendHandler(deps: PeerToolDeps) {
+  return async (kwargs: Record<string, unknown>): Promise<string> => {
+    const targetId = String(kwargs.target_agent_id || '').trim();
+    const message = typeof kwargs.message === 'string' ? kwargs.message.trim() : '';
+    const asyncMode = kwargs.async === true || kwargs.async === 'true';
+    if (!targetId) return '[ERROR] Missing required argument: target_agent_id';
+    if (!message) return '[ERROR] Missing required argument: message';
+
+    if (!deps.sendMessageToAgent) {
+      return '[ERROR] Inter-agent messaging is not available.';
+    }
+
+    const callerId = deps.callerAgentId ?? 'unknown';
+
+    // Resolve target: accept full id or prefix match against local agents
+    const locals = deps.manager.listLocalAgents();
+    const target = locals.find(
+      (a) => a.id === targetId || a.id.startsWith(targetId),
+    );
+    if (!target) {
+      const available = locals.map((a) => `  ${a.id}  [${a.status}]  ${a.label}`).join('\n');
+      return `[ERROR] No agent matching "${targetId}" in this window.\nAvailable agents:\n${available}`;
+    }
+    if (target.id === callerId) {
+      return '[ERROR] Cannot send a message to yourself.';
+    }
+
+    try {
+      const response = await deps.sendMessageToAgent(
+        callerId,
+        target.id,
+        message,
+        !asyncMode,
+      );
+      return response;
+    } catch (err) {
+      return `[ERROR] Failed to send message: ${err instanceof Error ? err.message : String(err)}`;
+    }
   };
 }
 
