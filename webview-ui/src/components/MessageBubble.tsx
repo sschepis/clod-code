@@ -9,11 +9,12 @@ interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: string;
+  attachments?: any[];
   model?: string;
   onRevert: (id: string) => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content, timestamp, model, onRevert }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content, timestamp, model, attachments, onRevert }) => {
   const isUser = role === 'user';
 
   let isToolResult = false;
@@ -65,7 +66,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content,
           isToolResult ? (
             <ToolResultBlock toolName={toolName} output={toolOutput} />
           ) : (
-            <div className="text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">{content}</div>
+            <div className="text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">
+              {content}
+              {attachments && attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {attachments.map(att => (
+                    <div key={att.id} className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-md py-1 px-2 text-xs text-zinc-300">
+                      {att.type === 'image' ? (
+                        <div className="flex items-center gap-1.5">
+                          {att.url && <img src={att.url} alt="attachment" className="w-4 h-4 object-cover rounded-sm" />}
+                          <span className="max-w-[150px] truncate">{att.name}</span>
+                        </div>
+                      ) : (
+                        <span className="max-w-[150px] truncate">📄 {att.name}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )
         ) : (
           <div className="text-zinc-200 leading-relaxed font-sans markdown-body">

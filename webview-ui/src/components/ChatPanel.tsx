@@ -45,6 +45,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             role="user"
             content={event.content}
             timestamp={event.timestamp}
+            attachments={event.attachments}
             onRevert={onRevert}
             onEdit={onEdit}
             onDelete={onDelete}
