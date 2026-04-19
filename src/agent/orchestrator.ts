@@ -51,14 +51,78 @@ import type {
 import { logger } from '../shared/logger';
 import { MAX_ATTACHMENT_TEXT_LENGTH } from '../shared/constants';
 import { resolveApiKey } from '../config/provider-registry';
+import { SpeechToText } from '../audio/speech-to-text';
 
 const PLAN_MODE_PREAMBLE =
   `[PLAN MODE — DO NOT write code, edit files, or make any changes. ` +
-  `Instead, analyze the request by reading the relevant code and produce a detailed implementation plan. ` +
-  `Your plan should include: which files need to change, what each change should be, the order of operations, ` +
-  `and any edge cases or risks. Use search/grep, search/glob, and file/read tools to explore the codebase. ` +
-  `Do NOT use file/write, file/edit, shell/run, or any tool that modifies state. ` +
-  `Present the plan in a clear, numbered format that can be acted on directly.]\n\n`;
+  `Your only permitted tools are search/grep, search/glob, and file/read. ` +
+  `Do NOT use file/write, file/edit, shell/run, or any tool that modifies state.\n\n` +
+
+  `## Your Goal\n` +
+  `Produce an implementation plan so detailed and unambiguous that a developer (or AI) could execute it ` +
+  `with zero questions, zero guesswork, and zero need to re-explore the codebase.\n\n` +
+
+  `## Phase 1 — Deep Exploration (spend the majority of your effort here)\n` +
+  `Before writing a single line of plan, exhaustively explore every part of the codebase that the task touches. ` +
+  `The most common planning failure is a shallow read — you MUST go deep.\n\n` +
+  `For each area the task involves:\n` +
+  `1. Read the FULL file, not just the function you think matters. Understand the surrounding code, imports, ` +
+  `   exports, and how other callers use it.\n` +
+  `2. Trace call chains end-to-end. If the task changes a function, find every caller and every callee. ` +
+  `   If it changes a type, find every usage. If it changes a message, trace it from sender to receiver.\n` +
+  `3. Search for existing patterns. Before proposing new code, grep for similar functionality that already ` +
+  `   exists — existing utilities, helpers, constants, hooks, or abstractions you should reuse.\n` +
+  `4. Read test files for the code you're planning to change. Understand what's covered and what test ` +
+  `   patterns the project uses.\n` +
+  `5. Check for conventions. Read 2-3 similar files to understand naming, file organization, import style, ` +
+  `   error handling patterns, and architectural boundaries the project follows.\n` +
+  `6. Identify shared types and interfaces. Read the type definitions that will be affected and understand ` +
+  `   their full shape, not just the fields you plan to add.\n\n` +
+
+  `## Phase 2 — Produce the Plan\n` +
+  `Structure your plan as follows:\n\n` +
+
+  `### Context\n` +
+  `Explain in 2-3 sentences why this change is being made and what outcome the user wants.\n\n` +
+
+  `### Files to Modify (in execution order)\n` +
+  `For EACH file, provide:\n` +
+  `- **File path** and a one-line summary of why it's changing\n` +
+  `- **Exact location**: the function/class/block being modified, with line numbers from your read\n` +
+  `- **Current code**: quote the specific lines being changed (not the whole file, just the change site)\n` +
+  `- **What to change**: describe the modification precisely — new parameters, new branches, new imports, ` +
+  `  renamed fields, added/removed lines. Be specific enough that the implementer doesn't need to re-read ` +
+  `  the file to understand the edit.\n` +
+  `- **Reuse**: name any existing functions, types, constants, or patterns from the codebase that should be ` +
+  `  used, with their file paths. Never propose creating something that already exists.\n\n` +
+
+  `### New Files (if any)\n` +
+  `For each new file:\n` +
+  `- **File path** and purpose\n` +
+  `- **Exports**: what it exports and who will import it\n` +
+  `- **Key logic**: describe the core implementation — not pseudocode, but a clear specification of behavior, ` +
+  `  edge cases, and how it integrates with existing code\n` +
+  `- **Patterns to follow**: reference an existing file in the project that this new file should mirror in ` +
+  `  style and structure\n\n` +
+
+  `### Integration Points\n` +
+  `Describe how the changes connect across files — message flow, type propagation, import chains, ` +
+  `event wiring. This is where plans most often fail: the individual file changes are correct but ` +
+  `they don't connect properly.\n\n` +
+
+  `### Edge Cases & Risks\n` +
+  `List specific things that could go wrong and how the plan accounts for them.\n\n` +
+
+  `### Verification\n` +
+  `Numbered steps to test the change end-to-end — build commands, manual test steps, what to check.\n\n` +
+
+  `## Rules\n` +
+  `- Do NOT hand-wave. "Update the handler to support X" is not a plan — specify which handler, ` +
+  `  what the current code looks like, and exactly what changes.\n` +
+  `- Do NOT propose abstractions, refactors, or cleanups beyond what the task requires.\n` +
+  `- Do NOT guess at code structure. If you're unsure, read more files before writing the plan.\n` +
+  `- Every file path, function name, and type name in your plan must come from an actual read — ` +
+  `  never from memory or assumption.]\n\n`;
 
 function wrapPlanMode(text: string): string {
   return PLAN_MODE_PREAMBLE + text;
@@ -96,6 +160,8 @@ export class Orchestrator {
   private memoryChangeUnsubscribe?: () => void;
   private panelRenamer?: (panelId: string, title: string) => void;
   private chatPanelOpener?: () => void;
+  private panelRevealer?: (panelId: string) => void;
+  private speechToText?: SpeechToText;
   private summaryListeners: Array<() => void> = [];
   private uiEventsSaveTimers = new Map<string, NodeJS.Timeout>();
   private foregroundReady = false;
@@ -119,6 +185,18 @@ export class Orchestrator {
     this.bridge.registerTarget('sidebar', sidebar);
     if (extensionContext) {
       this.memoryManager = new MemoryManager(extensionContext);
+      this.speechToText = new SpeechToText(extensionContext.globalStorageUri.fsPath);
+      this.speechToText.setCallbacks({
+        onStatusChange: (status, message) => {
+          this.bridge.post({ type: 'recording_status', status, message });
+        },
+        onTranscript: (text) => {
+          this.bridge.post({ type: 'recording_transcript', text });
+        },
+        onError: (error) => {
+          this.bridge.post({ type: 'recording_error', error });
+        },
+      });
     }
 
     // Workspace-scoped managers — shared across foreground + background agents.
@@ -568,6 +646,7 @@ export class Orchestrator {
     }
     this.uiEventsSaveTimers.clear();
 
+    this.speechToText?.dispose();
     void this.peerManager.stop();
     void this.routeManager.stop();
     this.surfaceManager.dispose();
@@ -593,6 +672,10 @@ export class Orchestrator {
 
   setChatPanelOpener(opener: () => void): void {
     this.chatPanelOpener = opener;
+  }
+
+  setPanelRevealer(revealer: (panelId: string) => void): void {
+    this.panelRevealer = revealer;
   }
 
   getAgentSummaries(): import('../shared/message-types').AgentSummary[] {
@@ -691,6 +774,9 @@ export class Orchestrator {
     const patched = { ...msg, agentId: panelId } as any;
     if (msg.type === 'ready') {
       patched.panelAgentId = panelId;
+    }
+    if (msg.type === 'focus_agent' || msg.type === 'cancel_agent') {
+      patched.agentId = (msg as any).agentId;
     }
     void this.handleWebviewMessage(patched as WebviewToExtMessage);
   }
@@ -924,6 +1010,9 @@ export class Orchestrator {
         : undefined,
       chatTitle,
       shell: { getShell: () => this.settings.shell },
+      tts: {
+        getApiKey: () => process.env.ELEVENLABS_API_KEY,
+      },
     });
   }
 
@@ -1028,7 +1117,7 @@ export class Orchestrator {
               }
             });
           } else {
-            await host.submit(inputText);
+            await host.submit(inputText, msg.attachments);
           }
         } else {
           logger.warn(`Submit ignored — agent "${agentId}" not available`);
@@ -1170,6 +1259,20 @@ export class Orchestrator {
         this.chatPanelOpener?.();
         break;
 
+      case 'start_recording':
+        if (this.speechToText) {
+          void this.speechToText.startRecording();
+        } else {
+          this.bridge.post({ type: 'recording_error', error: 'Speech-to-text not available' });
+        }
+        break;
+
+      case 'stop_recording':
+        if (this.speechToText) {
+          void this.speechToText.stopRecording();
+        }
+        break;
+
       case 'clear_session': {
         const clearId = msg.agentId ?? FOREGROUND_AGENT_ID;
         getUserPromptBridge().cancelAll();
@@ -1233,6 +1336,7 @@ export class Orchestrator {
       case 'focus_agent':
         this.bridge.setFocus(msg.agentId);
         this.bridge.sendSync(msg.agentId);
+        this.panelRevealer?.(msg.agentId);
         break;
 
       case 'cancel_agent':

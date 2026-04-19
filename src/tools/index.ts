@@ -1,7 +1,7 @@
 export { createFileReadHandler } from './file-read';
 export { createFileWriteHandler } from './file-write';
 export { createFileEditHandler } from './file-edit';
-export { createShellRunHandler, createShellBackgroundHandler } from './shell';
+export { createShellRunHandler, createShellBackgroundHandler, type ShellDeps } from './shell';
 export { createGlobSearchHandler } from './glob-search';
 export { createGrepSearchHandler } from './grep-search';
 export { createGitStatusHandler, createGitDiffHandler, createGitLogHandler, createGitCommitHandler, createGitBranchHandler, createGitStashHandler } from './git-ops';
@@ -48,6 +48,7 @@ export type { RouteToolDeps } from './route-ops';
 export { createVscodeRunHandler, createVscodeListHandler } from './vscode-command';
 export {
   createPeerListHandler,
+  createPeerDebugHandler,
   createPeerDispatchHandler,
   createPeerStatusHandler,
   createPeerAskHandler,
@@ -74,3 +75,7 @@ export {
   createRefactorPipelineHandler,
   createRefactorRegexHandler,
 } from './refactor-ops';
+export { createChatSetTitleHandler } from './chat-title';
+export type { ChatTitleDeps } from './chat-title';
+export { createSpeakHandler } from './elevenlabs-tts';
+export type { ElevenLabsTtsDeps } from './elevenlabs-tts';

@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, Zap, Map, FileText, X, Square } from 'lucide-react';
+import { ArrowRight, Zap, Map, FileText, X, Square, Mic, MicOff, Loader2 } from 'lucide-react';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import { postMessage } from '../vscode-api';
 import type { Attachment, SlashCommandInfo } from '../../../src/shared/message-types';
+
+type RecordingState = 'idle' | 'recording' | 'transcribing';
 
 interface InputAreaProps {
   onSubmit: (text: string, attachments: Attachment[], mode: 'act' | 'plan') => void;
@@ -13,16 +16,44 @@ interface InputAreaProps {
   activeModel: string;
   disabled?: boolean;
   disabledReason?: string;
+  recordingState?: RecordingState;
+  recordingError?: string | null;
+  pendingTranscript?: string | null;
+  onTranscriptConsumed?: () => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
   onSubmit, onInterrupt, isProcessing, mode, onModeChange, slashCommands, activeModel,
-  disabled, disabledReason,
+  disabled, disabledReason, recordingState = 'idle', recordingError, pendingTranscript, onTranscriptConsumed,
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const preRecordingTextRef = useRef('');
+
+  const isListening = recordingState === 'recording';
+  const isTranscribing = recordingState === 'transcribing';
+
+  const toggleRecording = () => {
+    if (isListening) {
+      postMessage({ type: 'stop_recording' });
+    } else {
+      preRecordingTextRef.current = inputValue;
+      postMessage({ type: 'start_recording' });
+    }
+  };
+
+  useEffect(() => {
+    if (pendingTranscript) {
+      const base = preRecordingTextRef.current || inputValue;
+      const separator = base && !base.endsWith(' ') ? ' ' : '';
+      const next = base + separator + pendingTranscript;
+      setInputValue(next);
+      preRecordingTextRef.current = next;
+      onTranscriptConsumed?.();
+    }
+  }, [pendingTranscript]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -48,13 +79,17 @@ export const InputArea: React.FC<InputAreaProps> = ({
         e.preventDefault();
         const file = item.getAsFile();
         if (file) {
-          const url = URL.createObjectURL(file);
-          setAttachments(prev => [...prev, {
-            id: Date.now() + i,
-            type: 'image',
-            name: file.name || 'image.png',
-            url,
-          }]);
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const url = event.target?.result as string;
+            setAttachments(prev => [...prev, {
+              id: Date.now() + i,
+              type: 'image',
+              name: file.name || 'image.png',
+              url,
+            }]);
+          };
+          reader.readAsDataURL(file);
         }
         return;
       }
@@ -172,7 +207,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 ? "Agent is working... press Esc to interrupt"
                 : "Give the agent a command, type '/' for actions, or paste images/logs..."
               }
-              className="w-full bg-transparent border-none py-3.5 pl-12 pr-32 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-[200px]"
+              className="w-full bg-transparent border-none py-3.5 pl-12 pr-40 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-[200px]"
               style={{ scrollbarWidth: 'thin' }}
             />
 
@@ -187,15 +222,21 @@ export const InputArea: React.FC<InputAreaProps> = ({
                   <Square size={10} fill="currentColor" /> Stop
                 </button>
               )}
+              <button
+                onClick={toggleRecording}
+                disabled={isTranscribing}
+                className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+                  isTranscribing
+                    ? 'text-amber-400 cursor-wait'
+                    : isListening
+                    ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30 recording-pulse'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                }`}
+                title={isTranscribing ? 'Transcribing...' : isListening ? 'Stop recording' : 'Start voice input'}
+              >
+                {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : isListening ? <MicOff size={14} /> : <Mic size={14} />}
+              </button>
               <div className="flex bg-zinc-950 rounded-md p-0.5 border border-zinc-800">
-                <button
-                  onClick={() => onModeChange('act')}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                    mode === 'act' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <Zap size={12} className={mode === 'act' ? 'text-amber-400' : ''} /> Act
-                </button>
                 <button
                   onClick={() => onModeChange('plan')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
@@ -204,18 +245,44 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 >
                   <Map size={12} className={mode === 'plan' ? 'text-blue-400' : ''} /> Plan
                 </button>
+                <button
+                  onClick={() => onModeChange('act')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    mode === 'act' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Zap size={12} className={mode === 'act' ? 'text-amber-400' : ''} /> Act
+                </button>
               </div>
             </div>
           </div>
         </div>
 
+        {recordingError && (
+          <div className="text-xs text-red-400 px-1 -mt-1">
+            Voice input: {recordingError}
+          </div>
+        )}
+
         {/* Footer metadata */}
         <div className="flex justify-between items-center text-xs text-zinc-600 px-1">
           <div className="flex items-center gap-4">
             <span>Model: {activeModel}</span>
-            <span className="flex items-center gap-1">
-              <kbd className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[10px] font-sans">Enter</kbd> to send
-            </span>
+            {isTranscribing ? (
+              <span className="flex items-center gap-1.5 text-amber-400">
+                <Loader2 size={10} className="animate-spin" />
+                Transcribing...
+              </span>
+            ) : isListening ? (
+              <span className="flex items-center gap-1.5 text-red-400">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 recording-pulse" />
+                Recording...
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <kbd className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[10px] font-sans">Enter</kbd> to send
+              </span>
+            )}
           </div>
           <span className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />

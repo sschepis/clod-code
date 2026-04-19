@@ -1,5 +1,5 @@
 import type { PeerManager, PeerSnapshot } from '../peers/peer-manager';
-import { currentWindowId } from '../shared/window-id';
+import { currentWindowId, getPresenceDirPath, listPresenceFilesRaw } from '../shared/window-id';
 
 export interface PeerToolDeps {
   manager: PeerManager;
@@ -30,7 +30,52 @@ export function createPeerListHandler(deps: PeerToolDeps) {
     const peers = deps.manager.listPeers();
     const selfId = currentWindowId();
     if (peers.length === 0) {
-      return `No peer Clodcode windows on this workspace.\nThis window: ${selfId.slice(0, 8)}.`;
+      // Include diagnostic info to help understand why no peers are visible
+      const presenceDir = getPresenceDirPath();
+      const rawFiles = listPresenceFilesRaw();
+      const otherFiles = rawFiles.filter((f) => !f.filename.startsWith(selfId.slice(0, 8)));
+      const lines: string[] = [
+        `No peer Clodcode windows on this workspace.`,
+        `This window: ${selfId.slice(0, 8)} (pid=${process.pid})`,
+        ``,
+        `Diagnostic info:`,
+        `  Presence dir: ${presenceDir ?? '(no workspace root)'}`,
+        `  Presence files found: ${rawFiles.length}`,
+      ];
+      for (const f of rawFiles) {
+        const isSelf = f.filename.startsWith(selfId.slice(0, 8));
+        const tag = isSelf ? ' (self)' : '';
+        if (f.content) {
+          lines.push(
+            `    ${f.filename}${tag}: pid=${f.content.pid}, port=${f.content.coordPort ?? 'none'}, alive=${f.alive}`
+          );
+        } else {
+          lines.push(`    ${f.filename}${tag}: ERROR ${f.error}`);
+        }
+      }
+      if (otherFiles.length === 0) {
+        lines.push(``);
+        lines.push(`No other windows detected. To use peer features, open the same`);
+        lines.push(`workspace folder in another VS Code window.`);
+      } else {
+        const withPort = otherFiles.filter((f) => f.content?.coordPort);
+        const withoutPort = otherFiles.filter((f) => f.content && !f.content.coordPort);
+        const dead = otherFiles.filter((f) => f.alive === false);
+        if (dead.length > 0) {
+          lines.push(``);
+          lines.push(`${dead.length} presence file(s) from dead processes detected.`);
+        }
+        if (withoutPort.length > 0) {
+          lines.push(``);
+          lines.push(`${withoutPort.length} window(s) found without coordPort — peer server may not have started.`);
+        }
+        if (withPort.length > 0) {
+          lines.push(``);
+          lines.push(`${withPort.length} window(s) found with coordPort but not in peer list.`);
+          lines.push(`This may indicate SSE connection issues. Use peer/debug for details.`);
+        }
+      }
+      return lines.join('\n');
     }
     const lines: string[] = [
       `This window: ${selfId.slice(0, 8)}`,
@@ -45,6 +90,85 @@ export function createPeerListHandler(deps: PeerToolDeps) {
         const label = a.id === 'foreground' ? 'foreground' : a.id.slice(0, 10);
         lines.push(`    └ ${label}  [${a.status}]  ${a.label}`);
       }
+    }
+    return lines.join('\n');
+  };
+}
+
+export function createPeerDebugHandler(deps: PeerToolDeps) {
+  return async (_kwargs: Record<string, unknown>): Promise<string> => {
+    const state = deps.manager.debugState();
+    const lines: string[] = [
+      `=== Peer Discovery Debug ===`,
+      ``,
+      `Self: ${state.selfId.slice(0, 8)} (full: ${state.selfId})`,
+      `Server port: ${state.serverPort}`,
+      `Presence dir: ${state.presenceDir ?? '(null)'}`,
+      ``,
+      `--- Presence Files (raw) ---`,
+    ];
+    if (state.presenceFiles.length === 0) {
+      lines.push(`  (none)`);
+    }
+    for (const f of state.presenceFiles) {
+      const isSelf = f.content?.windowId === state.selfId;
+      if (f.content) {
+        lines.push(
+          `  ${f.filename}${isSelf ? ' (SELF)' : ''}:` +
+          ` windowId=${f.content.windowId.slice(0, 8)}` +
+          ` pid=${f.content.pid}` +
+          ` coordPort=${f.content.coordPort ?? 'NONE'}` +
+          ` alive=${f.alive}` +
+          ` age=${ageString(f.content.createdAt)}`
+        );
+      } else {
+        lines.push(`  ${f.filename}: ERROR: ${f.error}`);
+      }
+    }
+    lines.push(``);
+    lines.push(`--- Active Windows (after filtering) ---`);
+    if (state.activeWindows.length === 0) {
+      lines.push(`  (none)`);
+    }
+    for (const w of state.activeWindows) {
+      const isSelf = w.windowId === state.selfId;
+      lines.push(
+        `  ${w.windowId.slice(0, 8)}${isSelf ? ' (SELF)' : ''}:` +
+        ` pid=${w.pid}` +
+        ` coordPort=${w.coordPort ?? 'NONE'}` +
+        ` age=${ageString(w.createdAt)}`
+      );
+    }
+    lines.push(``);
+    lines.push(`--- SSE Client Connections ---`);
+    lines.push(`  Total: ${state.clientCount}`);
+    if (state.clients.length === 0) {
+      lines.push(`  (none)`);
+    }
+    for (const c of state.clients) {
+      lines.push(
+        `  ${c.windowId.slice(0, 8)}:` +
+        ` pid=${c.pid}` +
+        ` port=${c.coordPort}` +
+        ` lastSeen=${ageString(Date.now() - c.lastSeenAgo)} ago` +
+        ` stale=${c.stale}` +
+        ` agents=${c.agentCount}` +
+        ` backoff=${c.backoffMs}ms`
+      );
+    }
+    lines.push(``);
+    lines.push(`--- Peers (visible to peer/list) ---`);
+    if (state.peers.length === 0) {
+      lines.push(`  (none — peers must have coordPort, be non-self, and lastSeen < 45s)`);
+    }
+    for (const p of state.peers) {
+      lines.push(
+        `  ${p.windowId.slice(0, 8)}:` +
+        ` pid=${p.pid}` +
+        ` port=${p.coordPort}` +
+        ` agents=${p.agents.length}` +
+        ` lastSeen=${ageString(p.lastSeen)} ago`
+      );
     }
     return lines.join('\n');
   };

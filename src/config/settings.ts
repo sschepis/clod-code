@@ -9,6 +9,7 @@ export interface ClodcodeSettings {
   remoteProvider: string;
   remoteModel: string;
   remoteApiKey: string;
+  remoteBaseUrl: string;
   providerKeys: Record<string, string>;
   permissionMode: 'readonly' | 'workspace-write' | 'full-access' | 'prompt';
   maxIterations: number;
@@ -29,6 +30,8 @@ export interface ClodcodeSettings {
   // ── Peer coordination ────────────────────────────────────────────
   /** When false, incoming peer dispatch/ask requests are silently rejected. */
   peerDispatchEnabled: boolean;
+  // ── Shell ────────────────────────────────────────────────────────
+  shell: string;
 }
 
 export function getSettings(): ClodcodeSettings {
@@ -42,6 +45,7 @@ export function getSettings(): ClodcodeSettings {
     remoteProvider: cfg.get<string>('remoteProvider', 'anthropic'),
     remoteModel: cfg.get<string>('remoteModel', 'claude-sonnet-4-20250514'),
     remoteApiKey: cfg.get<string>('remoteApiKey', ''),
+    remoteBaseUrl: cfg.get<string>('remoteBaseUrl', ''),
     providerKeys: cfg.get<Record<string, string>>('providerKeys', {}),
     permissionMode: cfg.get<ClodcodeSettings['permissionMode']>('permissionMode', 'prompt'),
     maxIterations: cfg.get<number>('maxIterations', 25),
@@ -57,6 +61,7 @@ export function getSettings(): ClodcodeSettings {
     surfacesAutoOpen: cfg.get<boolean>('surfacesAutoOpen', true),
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
+    shell: cfg.get<string>('shell', ''),
   };
 }
 

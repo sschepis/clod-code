@@ -1,10 +1,3 @@
-import { isMainThread, workerData } from 'worker_threads';
-import { runRouteWorker } from './routes/route-worker-entry';
-
-if (!isMainThread && workerData?.type === 'route-worker') {
-  runRouteWorker();
-}
-
 import * as vscode from 'vscode';
 import { SidebarProvider } from './vscode-integration/sidebar-provider';
 import { StatusBar } from './vscode-integration/status-bar';
@@ -111,6 +104,12 @@ export async function activate(context: vscode.ExtensionContext) {
       orchestrator.setPanelRenamer((panelId, title) => {
         cpm.renamePanel(panelId, title);
       });
+      orchestrator.setChatPanelOpener(() => {
+        cpm.openNew();
+      });
+      orchestrator.setPanelRevealer((panelId) => {
+        cpm.focusPanel(panelId);
+      });
 
       // Register panel serializer for VS Code to revive panels across reloads
       context.subscriptions.push(
@@ -146,11 +145,14 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register Clodcode Explorer
   try {
     const explorerProvider = new ExplorerProvider();
-    context.subscriptions.push(
-      vscode.window.registerTreeDataProvider('clodcode.explorer', explorerProvider),
-      explorerProvider
-    );
-    // Optional: Register a command to refresh the explorer
+    if (orchestrator) {
+      explorerProvider.setAgentProvider({
+        listAll: () => orchestrator!.getAgentSummaries(),
+      });
+      orchestrator.onSummariesChanged(() => explorerProvider.refresh());
+    }
+    const treeView = explorerProvider.createTreeView();
+    context.subscriptions.push(treeView, explorerProvider);
     context.subscriptions.push(
       vscode.commands.registerCommand('clodcode.refreshExplorer', () => explorerProvider.refresh())
     );

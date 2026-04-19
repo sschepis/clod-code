@@ -1,30 +1,33 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import type { AgentSummary } from '../shared/message-types';
 
-export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'clodcode-item';
+export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'clodcode-item' | 'task-group' | 'task-item';
+
+const MIME_TYPE = 'application/vnd.code.tree.clodcode.explorer';
 
 export class ExplorerNode extends vscode.TreeItem {
+  readonly nodeType: ExplorerNodeType;
+  agentId?: string;
+
   constructor(
-    public readonly label: string,
-    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly nodeType: ExplorerNodeType,
+    label: string,
+    collapsibleState: vscode.TreeItemCollapsibleState,
+    nodeType: ExplorerNodeType,
     resourceUri?: vscode.Uri,
-    iconPath?: string | vscode.ThemeIcon | { light: string | vscode.Uri; dark: string | vscode.Uri },
+    iconPath?: vscode.TreeItem['iconPath'],
     command?: vscode.Command
   ) {
-    super(resourceUri || label, collapsibleState);
     if (resourceUri) {
-      this.resourceUri = resourceUri;
-      // When passing resourceUri, super() ignores the label parameter. 
-      // We must explicitly set it if we want a custom label, 
-      // but for files we usually want the default resource label anyway.
-      // Setting it to undefined ensures the file name is used.
+      super(resourceUri, collapsibleState);
       if (nodeType === 'workspace-root') {
-         this.label = label;
+        this.label = label;
       }
     } else {
-      this.label = label;
+      super(label, collapsibleState);
     }
-    
+
+    this.nodeType = nodeType;
     if (iconPath) {
       this.iconPath = iconPath;
     }
@@ -34,23 +37,95 @@ export class ExplorerNode extends vscode.TreeItem {
   }
 }
 
-export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
+export interface AgentSummaryProvider {
+  listAll(): AgentSummary[];
+}
+
+export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, vscode.TreeDragAndDropController<ExplorerNode> {
   private _onDidChangeTreeData: vscode.EventEmitter<ExplorerNode | undefined | void> = new vscode.EventEmitter<ExplorerNode | undefined | void>();
   readonly onDidChangeTreeData: vscode.Event<ExplorerNode | undefined | void> = this._onDidChangeTreeData.event;
 
+  readonly dropMimeTypes = [MIME_TYPE, 'text/uri-list'];
+  readonly dragMimeTypes = [MIME_TYPE];
 
   private _watcher: vscode.FileSystemWatcher;
+  private agentProvider?: AgentSummaryProvider;
+  private treeView?: vscode.TreeView<ExplorerNode>;
 
   constructor() {
-    // Watch for file changes in the workspace
     this._watcher = vscode.workspace.createFileSystemWatcher('**/*');
     this._watcher.onDidCreate(() => this.refresh());
     this._watcher.onDidChange(() => this.refresh());
     this._watcher.onDidDelete(() => this.refresh());
   }
 
-  refresh(): void {
+  createTreeView(): vscode.TreeView<ExplorerNode> {
+    this.treeView = vscode.window.createTreeView('clodcode.explorer', {
+      treeDataProvider: this,
+      canSelectMany: true,
+      dragAndDropController: this,
+      showCollapseAll: true,
+    });
+    return this.treeView;
+  }
 
+  // ── Drag & Drop ──────────────────────────────────────────────────────
+
+  handleDrag(source: readonly ExplorerNode[], dataTransfer: vscode.DataTransfer): void {
+    const draggable = source.filter(n => n.resourceUri && (n.nodeType === 'file' || n.nodeType === 'directory' || n.nodeType === 'clodcode-item'));
+    if (draggable.length === 0) return;
+    dataTransfer.set(MIME_TYPE, new vscode.DataTransferItem(draggable.map(n => n.resourceUri!.toString())));
+  }
+
+  async handleDrop(target: ExplorerNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+    if (!target?.resourceUri) return;
+
+    const targetIsDir = target.nodeType === 'directory' || target.nodeType === 'workspace-root';
+    const destDir = targetIsDir ? target.resourceUri : vscode.Uri.file(path.dirname(target.resourceUri.fsPath));
+
+    // Handle internal tree drops
+    const internal = dataTransfer.get(MIME_TYPE);
+    if (internal) {
+      const uris: string[] = internal.value;
+      for (const uriStr of uris) {
+        const sourceUri = vscode.Uri.parse(uriStr);
+        const name = path.basename(sourceUri.fsPath);
+        const destUri = vscode.Uri.joinPath(destDir, name);
+        if (sourceUri.toString() === destUri.toString()) continue;
+        try {
+          await vscode.workspace.fs.rename(sourceUri, destUri, { overwrite: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(`Failed to move ${name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.refresh();
+      return;
+    }
+
+    // Handle external file drops (text/uri-list)
+    const external = dataTransfer.get('text/uri-list');
+    if (external) {
+      const rawValue = external.value;
+      const uriStrings = typeof rawValue === 'string' ? rawValue.split('\n').filter(Boolean) : [];
+      for (const uriStr of uriStrings) {
+        try {
+          const sourceUri = vscode.Uri.parse(uriStr.trim());
+          const name = path.basename(sourceUri.fsPath);
+          const destUri = vscode.Uri.joinPath(destDir, name);
+          await vscode.workspace.fs.copy(sourceUri, destUri, { overwrite: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(`Failed to copy: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.refresh();
+    }
+  }
+
+  setAgentProvider(provider: AgentSummaryProvider): void {
+    this.agentProvider = provider;
+  }
+
+  refresh(): void {
     this._onDidChangeTreeData.fire();
   }
 
@@ -60,8 +135,8 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
 
   async getChildren(element?: ExplorerNode): Promise<ExplorerNode[]> {
     if (!element) {
-      // Root level
       return [
+        new ExplorerNode('Tasks', vscode.TreeItemCollapsibleState.Expanded, 'virtual-root', undefined, new vscode.ThemeIcon('tasklist')),
         new ExplorerNode('Surfaces', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('browser')),
         new ExplorerNode('Routes', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('symbol-event')),
         new ExplorerNode('Conversations', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('comment-discussion')),
@@ -71,42 +146,51 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
     }
 
     if (element.nodeType === 'virtual-root') {
+      if (element.label === 'Tasks') {
+        return this.getTaskChildren();
+      }
+
       if (element.label === 'Workspace') {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
           return [];
         }
         if (workspaceFolders.length === 1) {
-          // If only one workspace folder, skip the folder level and show its contents
           return this.getFileSystemChildren(workspaceFolders[0].uri);
         }
-        return workspaceFolders.map(folder => 
-          new ExplorerNode(
+        return workspaceFolders.map(folder => {
+          const node = new ExplorerNode(
             folder.name,
             vscode.TreeItemCollapsibleState.Collapsed,
             'workspace-root',
             folder.uri,
             new vscode.ThemeIcon('folder')
-          )
-        );
+          );
+          node.contextValue = 'workspaceRoot';
+          return node;
+        });
       } else {
-        // Handle .clodcode folders
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) return [];
-        
+
         const rootUri = workspaceFolders[0].uri;
         let subfolder = '';
-        
+        let category = '';
+
         switch (element.label) {
-          case 'Surfaces': subfolder = 'surfaces'; break;
-          case 'Routes': subfolder = 'routes'; break;
-          case 'Conversations': subfolder = 'conversations'; break;
-          case 'Skills': subfolder = 'skills'; break;
+          case 'Surfaces': subfolder = 'surfaces'; category = 'surface'; break;
+          case 'Routes': subfolder = 'routes'; category = 'route'; break;
+          case 'Conversations': subfolder = 'conversations'; category = 'conversation'; break;
+          case 'Skills': subfolder = 'skills'; category = 'skill'; break;
         }
 
         const clodcodeDir = vscode.Uri.joinPath(rootUri, '.clodcode', subfolder);
-        return this.getFileSystemChildren(clodcodeDir, true);
+        return this.getFileSystemChildren(clodcodeDir, category);
       }
+    }
+
+    if (element.nodeType === 'task-group') {
+      return this.getTaskGroupChildren(element.label as string);
     }
 
     if (element.nodeType === 'workspace-root' || element.nodeType === 'directory') {
@@ -118,11 +202,141 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
     return [];
   }
 
-  private async getFileSystemChildren(dirUri: vscode.Uri, isClodcodeItem: boolean = false): Promise<ExplorerNode[]> {
+  private getTaskChildren(): ExplorerNode[] {
+    if (!this.agentProvider) {
+      const node = new ExplorerNode('No agent provider', vscode.TreeItemCollapsibleState.None, 'task-item', undefined, new vscode.ThemeIcon('info'));
+      node.description = 'Agent not initialized';
+      return [node];
+    }
+
+    const agents = this.agentProvider.listAll();
+    const running = agents.filter(a => a.status === 'running');
+    const idle = agents.filter(a => a.status === 'idle');
+    const completed = agents.filter(a => a.status === 'complete');
+    const failed = agents.filter(a => a.status === 'error' || a.status === 'cancelled');
+
+    const groups: ExplorerNode[] = [];
+
+    if (running.length > 0) {
+      const node = new ExplorerNode(
+        'Running',
+        vscode.TreeItemCollapsibleState.Expanded,
+        'task-group',
+        undefined,
+        new vscode.ThemeIcon('sync~spin'),
+      );
+      node.description = `${running.length}`;
+      groups.push(node);
+    }
+
+    if (idle.length > 0) {
+      const node = new ExplorerNode(
+        'Idle',
+        vscode.TreeItemCollapsibleState.Expanded,
+        'task-group',
+        undefined,
+        new vscode.ThemeIcon('circle-outline'),
+      );
+      node.description = `${idle.length}`;
+      groups.push(node);
+    }
+
+    if (completed.length > 0) {
+      const node = new ExplorerNode(
+        'Completed',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        'task-group',
+        undefined,
+        new vscode.ThemeIcon('check'),
+      );
+      node.description = `${completed.length}`;
+      groups.push(node);
+    }
+
+    if (failed.length > 0) {
+      const node = new ExplorerNode(
+        'Failed',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        'task-group',
+        undefined,
+        new vscode.ThemeIcon('error'),
+      );
+      node.description = `${failed.length}`;
+      groups.push(node);
+    }
+
+    if (groups.length === 0) {
+      const node = new ExplorerNode('No tasks', vscode.TreeItemCollapsibleState.None, 'task-item', undefined, new vscode.ThemeIcon('circle-outline'));
+      node.description = 'Spawn agents to see them here';
+      return [node];
+    }
+
+    return groups;
+  }
+
+  private getTaskGroupChildren(groupLabel: string): ExplorerNode[] {
+    if (!this.agentProvider) return [];
+
+    const agents = this.agentProvider.listAll();
+    let filtered: AgentSummary[];
+
+    switch (groupLabel) {
+      case 'Running':
+        filtered = agents.filter(a => a.status === 'running');
+        break;
+      case 'Idle':
+        filtered = agents.filter(a => a.status === 'idle');
+        break;
+      case 'Completed':
+        filtered = agents.filter(a => a.status === 'complete');
+        break;
+      case 'Failed':
+        filtered = agents.filter(a => a.status === 'error' || a.status === 'cancelled');
+        break;
+      default:
+        filtered = [];
+    }
+
+    return filtered.map(agent => {
+      const icon = agent.status === 'running'
+        ? new vscode.ThemeIcon('play-circle', new vscode.ThemeColor('charts.green'))
+        : agent.status === 'idle'
+        ? new vscode.ThemeIcon('circle-outline')
+        : agent.status === 'complete'
+        ? new vscode.ThemeIcon('pass', new vscode.ThemeColor('charts.green'))
+        : new vscode.ThemeIcon('error', new vscode.ThemeColor('charts.red'));
+
+      const node = new ExplorerNode(
+        agent.label,
+        vscode.TreeItemCollapsibleState.None,
+        'task-item',
+        undefined,
+        icon,
+      );
+
+      const model = agent.model.model;
+      const cost = agent.cost.totalCost > 0 ? ` · $${agent.cost.totalCost.toFixed(4)}` : '';
+      const depth = agent.depth > 0 ? ` · depth ${agent.depth}` : '';
+      node.description = `${model}${cost}${depth}`;
+
+      if (agent.task) {
+        node.tooltip = agent.task;
+      }
+
+      node.agentId = agent.id;
+      node.contextValue = agent.status === 'running' ? 'taskRunning'
+        : agent.status === 'idle' ? 'taskIdle'
+        : agent.status === 'complete' ? 'taskCompleted'
+        : 'taskFailed';
+
+      return node;
+    });
+  }
+
+  private async getFileSystemChildren(dirUri: vscode.Uri, category: string = ''): Promise<ExplorerNode[]> {
     try {
       const entries = await vscode.workspace.fs.readDirectory(dirUri);
-      
-      // Sort: directories first, then files
+
       entries.sort((a, b) => {
         if (a[1] === b[1]) {
           return a[0].localeCompare(b[0]);
@@ -133,29 +347,47 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
       return entries.map(([name, type]) => {
         const itemUri = vscode.Uri.joinPath(dirUri, name);
         const isDir = type === vscode.FileType.Directory;
-        
-        let iconPath: vscode.ThemeIcon | undefined;
+
         let command: vscode.Command | undefined;
 
         if (!isDir) {
-          command = {
-            command: 'vscode.open',
-            title: 'Open File',
-            arguments: [itemUri]
-          };
+          if (category === 'surface' && name.endsWith('.html')) {
+            const surfaceName = name.replace(/\.html$/, '');
+            command = {
+              command: 'clodcode.openSurface',
+              title: 'Open Surface',
+              arguments: [surfaceName]
+            };
+          } else {
+            command = {
+              command: 'vscode.open',
+              title: 'Open File',
+              arguments: [itemUri]
+            };
+          }
         }
 
-        return new ExplorerNode(
+        const isClodcodeItem = !!category;
+        const node = new ExplorerNode(
           name,
           isDir ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
           isDir ? 'directory' : (isClodcodeItem ? 'clodcode-item' : 'file'),
           itemUri,
-          iconPath,
+          undefined,
           command
         );
+
+        if (isDir) {
+          node.contextValue = category ? `${category}Dir` : 'directory';
+        } else if (category) {
+          node.contextValue = `${category}File`;
+        } else {
+          node.contextValue = 'workspaceFile';
+        }
+
+        return node;
       });
     } catch (error) {
-      // Directory might not exist yet
       return [];
     }
   }

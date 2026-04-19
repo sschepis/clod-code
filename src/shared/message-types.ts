@@ -307,6 +307,7 @@ export type ExtToWebviewMessage =
   | { type: 'ask_secret_resolved'; agentId?: string; promptId: string; status: 'answered' | 'cancelled'; savedToFile?: boolean }
   | { type: 'peer_dispatch_request'; agentId?: string; promptId: string; fromWindowId: string; task: string; label: string }
   | { type: 'peer_dispatch_resolved'; agentId?: string; promptId: string; status: 'approved' | 'rejected' }
+  | { type: 'title_changed'; agentId?: string; title: string }
   | { type: 'clear'; agentId?: string }
   | { type: 'slash_commands'; commands: SlashCommandInfo[] }
   | { type: 'clear_stale_errors'; agentId?: string }
@@ -322,7 +323,11 @@ export type ExtToWebviewMessage =
   // ── Object Manager ───────────────────────────────────────────────────
   | { type: 'objects_sync'; snapshot: ObjectSnapshot }
   // ── Model picker ────────────────────────────────────────────────────
-  | { type: 'provider_models'; providers: PickerProviderInfo[] };
+  | { type: 'provider_models'; providers: PickerProviderInfo[] }
+  // ── Speech-to-text ──────────────────────────────────────────────────
+  | { type: 'recording_status'; status: 'idle' | 'recording' | 'transcribing' | 'error'; message?: string }
+  | { type: 'recording_transcript'; text: string }
+  | { type: 'recording_error'; error: string };
 
 // ── Webview → Extension messages ──────────────────────────────────────
 
@@ -334,16 +339,22 @@ export type WebviewToExtMessage =
   | { type: 'ask_question_response'; agentId?: string; promptId: string; cancelled?: boolean; answerIndex?: number; answerText?: string }
   | { type: 'ask_secret_response'; agentId?: string; promptId: string; cancelled?: boolean; value?: string; saveToFile?: boolean }
   | { type: 'peer_dispatch_response'; agentId?: string; promptId: string; approved: boolean }
-  | { type: 'change_model'; provider: string; model: string }
-  | { type: 'clear_session' }
+  | { type: 'change_model'; agentId?: string; provider: string; model: string }
+  | { type: 'clear_session'; agentId?: string }
   | { type: 'revert'; agentId?: string; eventId: string }
+  | { type: 'delete_event'; agentId?: string; eventId: string }
+  | { type: 'edit_and_resubmit'; agentId?: string; eventId: string; text: string }
   | { type: 'slash_command'; agentId?: string; command: string; args: string }
   | { type: 'focus_agent'; agentId: string }
   | { type: 'cancel_agent'; agentId: string }
+  | { type: 'new_chat' }
   // ── Object Manager ───────────────────────────────────────────────────
   | { type: 'request_objects_sync' }
   // ── Model picker ────────────────────────────────────────────────────
   | { type: 'request_provider_models' }
+  // ── Speech-to-text ──────────────────────────────────────────────────
+  | { type: 'start_recording' }
+  | { type: 'stop_recording' }
   | {
       type: 'object_action';
       category: ObjectCategory;
@@ -373,6 +384,7 @@ export interface SettingsState {
   remoteProvider: string;
   remoteModel: string;
   remoteApiKey: string;
+  remoteBaseUrl: string;
   permissionMode: 'readonly' | 'workspace-write' | 'full-access' | 'prompt';
   maxIterations: number;
   maxContextTokens: number;

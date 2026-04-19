@@ -43,6 +43,14 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     postMessage({ type: 'revert', agentId, eventId });
   }, []);
 
+  const deleteEvent = useCallback((eventId: string, agentId?: string) => {
+    postMessage({ type: 'delete_event', agentId, eventId });
+  }, []);
+
+  const editAndResubmit = useCallback((eventId: string, text: string, agentId?: string) => {
+    postMessage({ type: 'edit_and_resubmit', agentId, eventId, text });
+  }, []);
+
   const respondPermission = useCallback(
     (eventId: string, allowed: boolean, remember: boolean, agentId?: string) => {
       postMessage({ type: 'permission_response', agentId, eventId, allowed, remember });
@@ -108,6 +116,8 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     clearSession,
     changeModel,
     revert,
+    deleteEvent,
+    editAndResubmit,
     respondPermission,
     respondQuestion,
     respondSecret,

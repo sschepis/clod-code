@@ -16,6 +16,8 @@ interface ChatPanelProps {
   phase: PhaseState;
   isProcessing: boolean;
   onRevert: (eventId: string) => void;
+  onEdit: (eventId: string, content: string) => void;
+  onDelete: (eventId: string) => void;
   onPermissionRespond: (eventId: string, allowed: boolean, remember: boolean) => void;
   onQuestionRespond: (promptId: string, response: { cancelled?: boolean; answerIndex?: number; answerText?: string }) => void;
   onSecretRespond: (promptId: string, response: { cancelled?: boolean; value?: string; saveToFile?: boolean }) => void;
@@ -23,11 +25,10 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
-  events, phase, isProcessing, onRevert, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond,
+  events, phase, isProcessing, onRevert, onEdit, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll on new events or during processing
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -45,6 +46,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             content={event.content}
             timestamp={event.timestamp}
             onRevert={onRevert}
+            onEdit={onEdit}
+            onDelete={onDelete}
           />
         );
       case 'assistant':
@@ -57,6 +60,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             timestamp={event.timestamp}
             model={event.model}
             onRevert={onRevert}
+            onDelete={onDelete}
           />
         );
       case 'thought':
@@ -171,12 +175,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         <div className="flex flex-col pb-4">
           {events.map(renderEvent)}
 
-          {/* Phase indicator at bottom during processing */}
           {isProcessing && phase.phase !== 'idle' && phase.phase !== 'complete' && (
             <PhaseIndicator phase={phase.phase} message={phase.message} />
           )}
 
-          {/* Typing indicator when processing but no active phase message */}
           {isProcessing && phase.phase === 'idle' && (
             <div className="px-6 py-4 ml-4 flex items-center gap-3 text-zinc-500 text-sm italic">
               <Loader2 size={14} className="animate-spin" />

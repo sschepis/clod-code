@@ -5,6 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { CodeBlock } from './CodeBlock';
+import { JsVizBlock } from './JsVizBlock';
 
 interface MarkdownContentProps {
   content: string;
@@ -65,9 +66,14 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
             );
           }
 
-          return (
-            <CodeBlock language={match?.[1] || ''} code={String(children).replace(/\n$/, '')} />
-          );
+          const lang = match?.[1] || '';
+          const codeStr = String(children).replace(/\n$/, '');
+
+          if (lang === 'jsviz') {
+            return <JsVizBlock code={codeStr} />;
+          }
+
+          return <CodeBlock language={lang} code={codeStr} />;
         },
         pre({ children }) {
           // Let the code component handle rendering

@@ -1,12 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { Terminal, AlertTriangle, ArrowLeft, Bot, MessageSquare, FolderTree, ChevronDown } from 'lucide-react';
+import { Terminal, AlertTriangle, ArrowLeft, Bot, ChevronDown, Plus } from 'lucide-react';
 import { ChatPanel } from './components/ChatPanel';
 import { InputArea } from './components/InputArea';
 import { CostBadge } from './components/CostBadge';
 import { AgentStrip } from './components/AgentStrip';
 import { PeersStrip } from './components/PeersStrip';
 import { OutboundDispatchesStrip } from './components/OutboundDispatchesStrip';
-import { ObjectManagerView } from './components/ObjectManagerView';
 import { ModelPicker } from './components/ModelPicker';
 import { useMessages } from './hooks/useMessages';
 import { useVsCode } from './hooks/useVsCode';
@@ -41,6 +40,7 @@ export default function App() {
     clearEvents,
     clearStaleErrors,
     revertTo,
+    deleteEvent,
     upsertAgent,
     patchAgent,
     removeAgent,
@@ -195,6 +195,16 @@ export default function App() {
       case 'provider_models':
         setPickerProviders(msg.providers);
         break;
+      case 'recording_status':
+        setRecordingState(msg.status === 'error' ? 'idle' : msg.status as any);
+        break;
+      case 'recording_transcript':
+        setPendingTranscript(msg.text);
+        break;
+      case 'recording_error':
+        setRecordingError(msg.error);
+        setTimeout(() => setRecordingError(null), 5000);
+        break;
     }
   }, [
     appendToken, addEvent, updateToolStatus, updatePermissionStatus,
@@ -204,7 +214,8 @@ export default function App() {
   ]);
 
   const {
-    submit, interrupt, revert, changeModel,
+    submit, interrupt, revert, deleteEvent: deleteEventMsg, editAndResubmit,
+    changeModel,
     respondPermission, respondQuestion, respondSecret, respondPeerDispatch,
     focusAgent, cancelAgent, objectAction,
   } = useVsCode(handleExtMessage);
@@ -215,6 +226,17 @@ export default function App() {
     revertTo(focusedAgentId, eventId);
     revert(eventId, focusedAgentId);
   }, [revertTo, revert, focusedAgentId]);
+
+  const handleDelete = useCallback((eventId: string) => {
+    deleteEvent(focusedAgentId, eventId);
+    deleteEventMsg(eventId, focusedAgentId);
+  }, [deleteEvent, deleteEventMsg, focusedAgentId]);
+
+  const handleEdit = useCallback((eventId: string, content: string) => {
+    // Revert to just before this message, then resubmit with edited text
+    revertTo(focusedAgentId, eventId);
+    editAndResubmit(eventId, content, focusedAgentId);
+  }, [revertTo, editAndResubmit, focusedAgentId]);
 
   const handleSubmit = useCallback((text: string, attachments: any[], mode: 'act' | 'plan') => {
     submit(text, attachments, mode, focusedAgentId);
@@ -236,9 +258,11 @@ export default function App() {
   const focusedAgentSummary = state.agents[focusedAgentId];
   const viewingBackground = !isPanelMode && focusedAgentId !== FOREGROUND_AGENT_ID;
 
-  const [activeView, setActiveView] = useState<'chat' | 'objects'>('chat');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerProviders, setPickerProviders] = useState<PickerProviderInfo[]>([]);
+  const [recordingState, setRecordingState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [pendingTranscript, setPendingTranscript] = useState<string | null>(null);
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -278,36 +302,16 @@ export default function App() {
           </h1>
         </div>
         
-        {/* Tab switcher (hidden in panel mode) */}
-        {!isPanelMode && (
-          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded mx-2 shrink-0">
-            <button
-              onClick={() => setActiveView('chat')}
-              className={`p-1.5 flex items-center gap-1.5 text-xs font-medium rounded-l transition-colors ${
-                activeView === 'chat'
-                  ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-              }`}
-              title="Chat View"
-            >
-              <MessageSquare size={14} />
-            </button>
-            <div className="w-px h-4 bg-zinc-800" />
-            <button
-              onClick={() => setActiveView('objects')}
-              className={`p-1.5 flex items-center gap-1.5 text-xs font-medium rounded-r transition-colors ${
-                activeView === 'objects'
-                  ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-              }`}
-              title="Object Manager"
-            >
-              <FolderTree size={14} />
-            </button>
-          </div>
-        )}
-
         <div className="flex items-center gap-3 shrink-0">
+          {!isPanelMode && (
+            <button
+              onClick={() => postMessage({ type: 'new_chat' })}
+              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+              title="New Chat Window"
+            >
+              <Plus size={14} />
+            </button>
+          )}
           <CostBadge cost={aggregateCost} />
 
           <div className="relative">
@@ -359,67 +363,50 @@ export default function App() {
         </div>
       )}
 
-      {!isPanelMode && activeView === 'objects' ? (
-        <div className="flex-1 overflow-hidden">
-          <ObjectManagerView
-            objects={state.objects}
-            agents={agentList}
-            focusedAgentId={focusedAgentId}
-            onFocusAgent={(id) => {
-              handleFocusAgent(id);
-              setActiveView('chat');
-            }}
-            onCancelAgent={handleCancelAgent}
-            onObjectAction={objectAction}
-          />
-        </div>
-      ) : (
-        <>
-          {/* Chat area */}
-          <ChatPanel
-            events={focusedSlice.events}
-            phase={focusedSlice.phase}
-            isProcessing={isProcessing}
-            onRevert={handleRevert}
-            onPermissionRespond={(eventId, allowed, remember) =>
-              respondPermission(eventId, allowed, remember, focusedAgentId)
-            }
-            onQuestionRespond={(promptId, response) => respondQuestion(promptId, response, focusedAgentId)}
-            onSecretRespond={(promptId, response) => respondSecret(promptId, response, focusedAgentId)}
-            onPeerDispatchRespond={(promptId, approved) => respondPeerDispatch(promptId, approved, focusedAgentId)}
-          />
+      {/* Chat area */}
+      <ChatPanel
+        events={focusedSlice.events}
+        phase={focusedSlice.phase}
+        isProcessing={isProcessing}
+        onRevert={handleRevert}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onPermissionRespond={(eventId, allowed, remember) =>
+          respondPermission(eventId, allowed, remember, focusedAgentId)
+        }
+        onQuestionRespond={(promptId, response) => respondQuestion(promptId, response, focusedAgentId)}
+        onSecretRespond={(promptId, response) => respondSecret(promptId, response, focusedAgentId)}
+        onPeerDispatchRespond={(promptId, approved) => respondPeerDispatch(promptId, approved, focusedAgentId)}
+      />
 
-          {/* Peer windows strip (hidden in panel mode) */}
-          {!isPanelMode && <PeersStrip peers={state.peers} />}
+      <PeersStrip peers={state.peers} />
 
-          {/* Outbound dispatches strip (hidden in panel mode) */}
-          {!isPanelMode && <OutboundDispatchesStrip dispatches={state.outboundDispatches} />}
+      {!isPanelMode && <OutboundDispatchesStrip dispatches={state.outboundDispatches} />}
 
-          {/* Background agents strip (hidden in panel mode) */}
-          {!isPanelMode && (
-            <AgentStrip
-              agents={agentList}
-              focusedAgentId={focusedAgentId}
-              syncMetrics={state.syncMetrics}
-              onFocus={handleFocusAgent}
-              onCancel={handleCancelAgent}
-            />
-          )}
+      <AgentStrip
+        agents={agentList}
+        focusedAgentId={focusedAgentId}
+        syncMetrics={state.syncMetrics}
+        onFocus={handleFocusAgent}
+        onCancel={handleCancelAgent}
+      />
 
-          {/* Input — disabled when viewing a background agent */}
-          <InputArea
-            onSubmit={handleSubmit}
-            onInterrupt={() => interrupt(focusedAgentId)}
-            isProcessing={isProcessing}
-            mode={focusedSlice.mode}
-            onModeChange={handleSetMode}
-            slashCommands={state.slashCommands}
-            activeModel={focusedSlice.activeModel.model}
-            disabled={viewingBackground}
-            disabledReason={viewingBackground ? 'Viewing a background agent — switch to foreground to submit new input.' : undefined}
-          />
-        </>
-      )}
+      {/* Input — disabled when viewing a background agent */}
+      <InputArea
+        onSubmit={handleSubmit}
+        onInterrupt={() => interrupt(focusedAgentId)}
+        isProcessing={isProcessing}
+        mode={focusedSlice.mode}
+        onModeChange={handleSetMode}
+        slashCommands={state.slashCommands}
+        activeModel={focusedSlice.activeModel.model}
+        disabled={viewingBackground}
+        disabledReason={viewingBackground ? 'Viewing a background agent — switch to foreground to submit new input.' : undefined}
+        recordingState={recordingState}
+        recordingError={recordingError}
+        pendingTranscript={pendingTranscript}
+        onTranscriptConsumed={() => setPendingTranscript(null)}
+      />
     </div>
   );
 }

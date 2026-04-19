@@ -8,10 +8,13 @@ const CopyPlugin = require('copy-webpack-plugin');
 const config = {
   target: 'node',
   mode: 'none',
-  entry: './src/extension.ts',
+  entry: {
+    extension: './src/extension.ts',
+    'route-worker': './src/routes/route-worker-bootstrap.ts',
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: 'extension.js',
+    filename: '[name].js',
     libraryTarget: 'commonjs2',
   },
   externals: [

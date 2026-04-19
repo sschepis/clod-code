@@ -81,6 +81,7 @@ export class AgentHost {
   private activeModel: ModelInfo;
   private disposed = false;
   private listeners = new Set<HostEventListener>();
+  private pendingInput: string | null = null;
 
   constructor(config: AgentHostConfig) {
     this.id = config.id;
@@ -115,12 +116,17 @@ export class AgentHost {
   }
 
   /** Submit user or task input to the agent. */
-  async submit(text: string): Promise<void> {
+  async submit(text: string, attachments?: any[]): Promise<void> {
     if (!this.agent) {
       this.emit({ type: 'error', message: `Agent ${this.id} is not initialized` });
       return;
     }
-    await this.agent.submitInput(text);
+    if (this.isProcessing) {
+      this.pendingInput = text;
+      logger.info(`AgentHost "${this.id}": queued input while processing`);
+      return;
+    }
+    await this.agent.submitInput(text, attachments);
   }
 
   async interrupt(): Promise<void> {
@@ -278,6 +284,7 @@ export class AgentHost {
         toolCalls: p.toolCalls,
         usage: p.usage,
       });
+      this.drainPendingInput();
     });
 
     a.on('cost_update', (e) => {
@@ -308,6 +315,17 @@ export class AgentHost {
     a.on('doom_loop', (e) => {
       const p = e.payload as { reason: string; command: string };
       this.emit({ type: 'doom_loop', reason: p.reason, command: p.command });
+    });
+  }
+
+  private drainPendingInput(): void {
+    const text = this.pendingInput;
+    if (!text || !this.agent) return;
+    this.pendingInput = null;
+    logger.info(`AgentHost "${this.id}": submitting queued input`);
+    this.agent.submitInput(text).catch((err) => {
+      logger.error(`AgentHost "${this.id}": failed to submit queued input`, err);
+      this.emit({ type: 'error', message: getErrorMessage(err) });
     });
   }
 

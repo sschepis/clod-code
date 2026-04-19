@@ -195,3 +195,12 @@ textarea:focus {
 .pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
+
+/* Recording indicator pulse */
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.recording-pulse {
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}

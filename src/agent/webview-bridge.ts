@@ -44,14 +44,27 @@ interface AgentUiSlice {
   mode: 'act' | 'plan';
 }
 
+export type SliceChangeListener = (agentId: string) => void;
+
 export class WebviewBridge {
   private slices = new Map<string, AgentUiSlice>();
   private summaries = new Map<string, AgentSummary>();
   private hostDetachers = new Map<string, () => void>();
   private focusedAgentId: string = FOREGROUND_AGENT_ID;
   private targets = new Map<string, WebviewTarget>();
+  private sliceChangeListeners: SliceChangeListener[] = [];
 
   constructor() {}
+
+  onSliceChanged(listener: SliceChangeListener): void {
+    this.sliceChangeListeners.push(listener);
+  }
+
+  private notifySliceChanged(agentId: string): void {
+    for (const l of this.sliceChangeListeners) {
+      try { l(agentId); } catch { /* best-effort */ }
+    }
+  }
 
   registerTarget(targetId: string, target: WebviewTarget): void {
     this.targets.set(targetId, target);
@@ -243,6 +256,7 @@ export class WebviewBridge {
       slice.events.splice(0, slice.events.length - MAX_EVENTS_PER_SLICE);
     }
     this.post({ type: 'event', agentId, event });
+    this.notifySliceChanged(agentId);
   }
 
   /**
@@ -255,6 +269,7 @@ export class WebviewBridge {
     const idx = slice.events.findIndex(predicate);
     if (idx === -1) return;
     slice.events[idx] = { ...slice.events[idx], ...patch } as SessionEvent;
+    this.notifySliceChanged(agentId);
   }
 
   clearSlice(agentId: string): void {
@@ -345,7 +360,6 @@ export class WebviewBridge {
         if (!slice.streamingEventId) {
           slice.streamingEventId = `assistant-${Date.now()}-${rand()}`;
         }
-        // Also mutate the slice event list so history reflects streamed content
         const eventId = slice.streamingEventId;
         const lastIdx = slice.events.length - 1;
         const last = lastIdx >= 0 ? slice.events[lastIdx] : undefined;
@@ -364,6 +378,7 @@ export class WebviewBridge {
           }
         }
         this.post({ type: 'token', agentId, text: event.text, eventId });
+        this.notifySliceChanged(agentId);
         break;
       }
 
@@ -397,6 +412,7 @@ export class WebviewBridge {
               output,
               duration,
             });
+            this.notifySliceChanged(agentId);
             break;
           }
         }

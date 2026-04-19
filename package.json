@@ -2,7 +2,7 @@
   "name": "clodcode",
   "displayName": "Clod Code",
   "description": "Multi-LLM AI coding assistant for VS Code",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "publisher": "sschepis",
   "license": "MIT",
   "repository": {
@@ -64,7 +64,10 @@
       {
         "command": "clodcode.focusChat",
         "title": "Clod Code: Focus Chat",
-        "icon": "$(comment-discussion)"
+        "icon": {
+          "light": "assets/icon.png",
+          "dark": "assets/icon.png"
+        }
       },
       {
         "command": "clodcode.openSettings",
@@ -104,9 +107,52 @@
         "command": "clodcode.refreshExplorer",
         "title": "Refresh Explorer",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "clodcode.explorer.openFile",
+        "title": "Open"
+      },
+      {
+        "command": "clodcode.explorer.deleteFile",
+        "title": "Delete"
+      },
+      {
+        "command": "clodcode.explorer.revealInFinder",
+        "title": "Reveal in Finder"
+      },
+      {
+        "command": "clodcode.explorer.copyPath",
+        "title": "Copy Path"
+      },
+      {
+        "command": "clodcode.explorer.copyRelativePath",
+        "title": "Copy Relative Path"
+      },
+      {
+        "command": "clodcode.explorer.cancelTask",
+        "title": "Cancel",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "clodcode.explorer.copyTaskResult",
+        "title": "Copy Result"
+      },
+      {
+        "command": "clodcode.explorer.rerunTask",
+        "title": "Re-run Task"
+      },
+      {
+        "command": "clodcode.explorer.focusTask",
+        "title": "Focus in Chat"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "clodcode.focusChat",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
         {
           "command": "clodcode.askAboutSelection",
@@ -127,6 +173,53 @@
           "command": "clodcode.writeTests",
           "when": "editorHasSelection",
           "group": "clodcode@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "clodcode.explorer.openFile",
+          "when": "view == clodcode.explorer && viewItem =~ /File$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clodcode.explorer.revealInFinder",
+          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clodcode.explorer.copyPath",
+          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "group": "copy@1"
+        },
+        {
+          "command": "clodcode.explorer.copyRelativePath",
+          "when": "view == clodcode.explorer && viewItem =~ /File$|Dir$|workspaceRoot|workspaceFile|directory/",
+          "group": "copy@2"
+        },
+        {
+          "command": "clodcode.explorer.deleteFile",
+          "when": "view == clodcode.explorer && viewItem =~ /surfaceFile|routeFile|routeDir|skillFile|conversationFile|workspaceFile|directory/",
+          "group": "danger@1"
+        },
+        {
+          "command": "clodcode.explorer.focusTask",
+          "when": "view == clodcode.explorer && viewItem =~ /^task/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clodcode.explorer.cancelTask",
+          "when": "view == clodcode.explorer && viewItem == taskRunning",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clodcode.explorer.copyTaskResult",
+          "when": "view == clodcode.explorer && viewItem =~ /taskCompleted|taskFailed/",
+          "group": "copy@1"
+        },
+        {
+          "command": "clodcode.explorer.rerunTask",
+          "when": "view == clodcode.explorer && viewItem =~ /taskCompleted|taskFailed/",
+          "group": "inline@1"
         }
       ],
       "view/title": [
@@ -163,6 +256,12 @@
         "key": "ctrl+shift+n",
         "mac": "cmd+shift+n",
         "when": "view == clodcode.chatPanel"
+      },
+      {
+        "command": "clodcode.explorer.deleteFile",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == clodcode.explorer && listFocus"
       }
     ],
     "configuration": {
@@ -179,7 +278,8 @@
             "vertex-gemini",
             "vertex-anthropic",
             "openrouter",
-            "deepseek"
+            "deepseek",
+            "azure-openai"
           ],
           "default": "ollama",
           "description": "LLM provider for the local (triage) model"
@@ -209,6 +309,7 @@
             "vertex-anthropic",
             "openrouter",
             "deepseek",
+            "azure-openai",
             "ollama",
             "lmstudio"
           ],
@@ -224,6 +325,11 @@
           "type": "string",
           "default": "",
           "description": "API key for the remote provider (prefer env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
+        },
+        "clodcode.remoteBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL / endpoint for the remote provider. Required for Azure OpenAI (e.g. https://myresource.openai.azure.com). Optional for other providers."
         },
         "clodcode.providerKeys": {
           "type": "object",
@@ -314,6 +420,18 @@
           "type": "boolean",
           "default": true,
           "description": "Allow other Clodcode windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
+        },
+        "clodcode.shell": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "/bin/zsh", "/bin/bash", "/bin/sh"],
+          "enumDescriptions": [
+            "Auto-detect (uses $SHELL or system default)",
+            "Zsh",
+            "Bash",
+            "POSIX sh"
+          ],
+          "description": "Shell to use for tool commands. Leave empty to auto-detect from $SHELL."
         }
       }
     },

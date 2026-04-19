@@ -3,9 +3,24 @@ let extractor: any = null;
 const dynamicImport: <T = any>(specifier: string) => Promise<T> =
   new Function('specifier', 'return import(specifier)') as any;
 
+async function loadTransformers(): Promise<typeof import('@xenova/transformers')> {
+  try {
+    return await dynamicImport('@xenova/transformers');
+  } catch {
+    const vscode = require('vscode');
+    const folders = vscode.workspace?.workspaceFolders;
+    if (folders?.length) {
+      const path = require('path');
+      const entryFile = path.join(folders[0].uri.fsPath, 'node_modules', '@xenova', 'transformers', 'src', 'transformers.js');
+      return await dynamicImport(entryFile);
+    }
+    throw new Error('@xenova/transformers not found — install it in the workspace or extension');
+  }
+}
+
 export async function initEncoder(): Promise<void> {
   if (extractor) return;
-  const { pipeline } = await dynamicImport<typeof import('@xenova/transformers')>('@xenova/transformers');
+  const { pipeline } = await loadTransformers();
   extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
     quantized: true,
   });

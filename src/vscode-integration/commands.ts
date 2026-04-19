@@ -3,6 +3,7 @@ import { COMMANDS } from '../shared/constants';
 import type { Orchestrator } from '../agent/orchestrator';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ChatPanelManager } from './chat-panel-manager';
+import type { ExplorerNode } from './explorer-provider';
 import { PROVIDERS } from '../config/provider-registry';
 import { SettingsPanel } from './settings-panel';
 import { logger } from '../shared/logger';
@@ -37,12 +38,16 @@ export function registerCommands(
 
   // Open a surface (webview panel rendered from .clodcode/surfaces/<name>.html)
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMANDS.OPEN_SURFACE, async () => {
+    vscode.commands.registerCommand(COMMANDS.OPEN_SURFACE, async (surfaceName?: string) => {
       if (!orchestrator) {
         vscode.window.showWarningMessage('Clodcode orchestrator is not available.');
         return;
       }
-      await orchestrator.getSurfaceManager().openPicker();
+      if (surfaceName) {
+        orchestrator.getSurfaceManager().openPanel(surfaceName, false);
+      } else {
+        await orchestrator.getSurfaceManager().openPicker();
+      }
     })
   );
 
@@ -243,5 +248,119 @@ export function registerCommands(
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.WRITE_TESTS, () => askWithSelection('Please write unit tests for the following code:'))
+  );
+
+  // ── Explorer context menu commands ──────────────────────────────
+  // Tree view commands receive (clickedNode, selectedNodes[]) when canSelectMany is true.
+
+  const resolveNodes = (node: ExplorerNode, selected?: ExplorerNode[]): ExplorerNode[] =>
+    selected && selected.length > 0 ? selected : [node];
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_OPEN_FILE, (node: ExplorerNode, selected?: ExplorerNode[]) => {
+      for (const n of resolveNodes(node, selected)) {
+        if (n.resourceUri) {
+          vscode.commands.executeCommand('vscode.open', n.resourceUri);
+        }
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_DELETE_FILE, async (node: ExplorerNode, selected?: ExplorerNode[]) => {
+      const nodes = resolveNodes(node, selected).filter(n => n.resourceUri);
+      if (nodes.length === 0) return;
+      const label = nodes.length === 1
+        ? `"${(nodes[0].label as string) || nodes[0].resourceUri!.fsPath.split('/').pop()}"`
+        : `${nodes.length} items`;
+      const confirm = await vscode.window.showWarningMessage(
+        `Move ${label} to Trash?`, { modal: true }, 'Move to Trash'
+      );
+      if (confirm !== 'Move to Trash') return;
+      for (const n of nodes) {
+        try {
+          await vscode.workspace.fs.delete(n.resourceUri!, { recursive: true, useTrash: true });
+        } catch (err) {
+          vscode.window.showErrorMessage(`Failed to delete: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_REVEAL_IN_FINDER, (node: ExplorerNode) => {
+      if (node.resourceUri) {
+        vscode.commands.executeCommand('revealFileInOS', node.resourceUri);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_COPY_PATH, (node: ExplorerNode, selected?: ExplorerNode[]) => {
+      const paths = resolveNodes(node, selected)
+        .filter(n => n.resourceUri)
+        .map(n => n.resourceUri!.fsPath);
+      if (paths.length > 0) {
+        vscode.env.clipboard.writeText(paths.join('\n'));
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_COPY_RELATIVE_PATH, (node: ExplorerNode, selected?: ExplorerNode[]) => {
+      const paths = resolveNodes(node, selected)
+        .filter(n => n.resourceUri)
+        .map(n => vscode.workspace.asRelativePath(n.resourceUri!, false));
+      if (paths.length > 0) {
+        vscode.env.clipboard.writeText(paths.join('\n'));
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_CANCEL_TASK, (node: ExplorerNode, selected?: ExplorerNode[]) => {
+      if (!orchestrator) return;
+      for (const n of resolveNodes(node, selected)) {
+        if (n.agentId) orchestrator.cancelAgent(n.agentId);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_COPY_TASK_RESULT, async (node: ExplorerNode) => {
+      if (!node.agentId || !orchestrator) return;
+      const summaries = orchestrator.getAgentSummaries();
+      const agent = summaries.find(a => a.id === node.agentId);
+      if (agent?.result) {
+        await vscode.env.clipboard.writeText(agent.result);
+        vscode.window.showInformationMessage('Task result copied to clipboard.');
+      } else if (agent?.error) {
+        await vscode.env.clipboard.writeText(agent.error);
+        vscode.window.showInformationMessage('Task error copied to clipboard.');
+      } else {
+        vscode.window.showInformationMessage('No result available for this task.');
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_RERUN_TASK, async (node: ExplorerNode) => {
+      if (!node.agentId || !orchestrator) return;
+      const summaries = orchestrator.getAgentSummaries();
+      const agent = summaries.find(a => a.id === node.agentId);
+      if (!agent?.task) {
+        vscode.window.showWarningMessage('No task prompt available to re-run.');
+        return;
+      }
+      await orchestrator.submitToAgent('foreground', `Re-run the following task:\n\n${agent.task}`);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.EXPLORER_FOCUS_TASK, (node: ExplorerNode) => {
+      if (node.agentId && sidebar) {
+        sidebar.postMessage({ type: 'agents_sync', agents: orchestrator?.getAgentSummaries() ?? [], focusedAgentId: node.agentId });
+      }
+    })
   );
 }

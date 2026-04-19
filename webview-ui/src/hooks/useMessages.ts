@@ -325,6 +325,15 @@ export function useMessages() {
     });
   }, []);
 
+  const deleteEvent = useCallback((agentId: string, eventId: string) => {
+    setState(prev => {
+      const slice = prev.slices[agentId];
+      if (!slice) return prev;
+      const events = slice.events.filter(e => e.id !== eventId);
+      return { ...prev, slices: { ...prev.slices, [agentId]: { ...slice, events } } };
+    });
+  }, []);
+
   // ── Agent summary mutators ─────────────────────────────────────────
 
   const upsertAgent = useCallback((summary: AgentSummary) => {
@@ -397,6 +406,7 @@ export function useMessages() {
     clearEvents,
     clearStaleErrors,
     revertTo,
+    deleteEvent,
     upsertAgent,
     patchAgent,
     removeAgent,

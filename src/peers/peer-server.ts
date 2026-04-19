@@ -208,6 +208,12 @@ export class PeerServer {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
+    if (url.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, windowId: this.opts.windowId, pid: process.pid, port: this.port }));
+      return;
+    }
+
     if (url.pathname === '/info') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -274,7 +280,11 @@ export class PeerServer {
       };
       res.write(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`);
       this.clients.add(res);
-      const onClose = () => { this.clients.delete(res); };
+      logger.info(`[peers] SSE client connected (total=${this.clients.size}), sent hello with ${hello.agents?.length ?? 0} agent(s)`);
+      const onClose = () => {
+        this.clients.delete(res);
+        logger.info(`[peers] SSE client disconnected (remaining=${this.clients.size})`);
+      };
       req.on('close', onClose);
       res.on('close', onClose);
       return;

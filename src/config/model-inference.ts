@@ -43,6 +43,8 @@ export function isModelCompatibleWithProvider(model: string, provider: string): 
   if (provider === 'vertex-anthropic' && inferred === 'anthropic') return true;
   // OpenRouter/openai-compat can route to any model
   if (provider === 'openrouter') return true;
+  // Azure deployments use custom names
+  if (provider === 'azure-openai') return true;
   // Ollama/lmstudio can serve any local model name
   if ((provider === 'ollama' || provider === 'lmstudio') && inferred === 'ollama') return true;
 
@@ -96,6 +98,12 @@ export const PROVIDER_MODEL_SUGGESTIONS: Record<string, string[]> = {
   lmstudio: [
     'llama-3.1-8b-instruct',
     'qwen2.5-coder-7b-instruct',
+  ],
+  'azure-openai': [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4',
+    'gpt-35-turbo',
   ],
 };
 

@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { logger } from '../shared/logger';
 import type { PeerEvent } from './peer-server';
 
 export interface PeerClientOptions {
@@ -20,6 +21,7 @@ export class PeerClient {
   constructor(private readonly opts: PeerClientOptions) {}
 
   start(): void {
+    logger.info(`[peers] SSE client connecting to 127.0.0.1:${this.opts.port}/events`);
     const req = http.request({
       host: '127.0.0.1',
       port: this.opts.port,
@@ -29,16 +31,27 @@ export class PeerClient {
     }, (res) => {
       this.res = res;
       if (res.statusCode !== 200) {
+        logger.warn(`[peers] SSE /events returned status ${res.statusCode} from port ${this.opts.port}`);
         this.close(new Error(`peer /events returned ${res.statusCode}`));
         return;
       }
+      logger.info(`[peers] SSE connection established to port ${this.opts.port}`);
       res.setEncoding('utf8');
       res.on('data', (chunk: string) => this.onChunk(chunk));
-      res.on('end', () => this.close());
-      res.on('error', (err) => this.close(err));
+      res.on('end', () => {
+        logger.info(`[peers] SSE stream ended from port ${this.opts.port}`);
+        this.close();
+      });
+      res.on('error', (err) => {
+        logger.warn(`[peers] SSE stream error from port ${this.opts.port}: ${err.message}`);
+        this.close(err);
+      });
     });
 
-    req.on('error', (err) => this.close(err));
+    req.on('error', (err) => {
+      logger.warn(`[peers] SSE request error to port ${this.opts.port}: ${err.message}`);
+      this.close(err);
+    });
     req.end();
     this.req = req;
   }
@@ -73,7 +86,7 @@ export class PeerClient {
         this.opts.onEvent(parsed as PeerEvent);
       }
     } catch {
-      // Non-JSON SSE event — ignore for Phase A.
+      // Non-JSON SSE event — ignore.
     }
   }
 

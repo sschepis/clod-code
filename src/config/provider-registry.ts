@@ -75,6 +75,13 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     requiresApiKey: true,
     isLocal: false,
   },
+  'azure-openai': {
+    name: 'azure-openai',
+    displayName: 'Azure OpenAI',
+    envKeyVar: ENV_KEY_MAP['azure-openai'],
+    requiresApiKey: true,
+    isLocal: false,
+  },
 };
 
 export function getProviderMeta(providerName: string): ProviderMeta | undefined {

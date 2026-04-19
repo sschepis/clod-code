@@ -3,6 +3,7 @@ import { ChatPanel } from './chat-panel';
 import type { Orchestrator } from '../agent/orchestrator';
 import type { SessionStore, PanelMeta } from '../agent/session-store';
 import { logger } from '../shared/logger';
+import { generateChatName } from '../shared/name-generator';
 
 export class ChatPanelManager {
   private panels = new Map<string, ChatPanel>();
@@ -17,7 +18,7 @@ export class ChatPanelManager {
   openNew(label?: string): string {
     this.counter += 1;
     const panelId = `chat-${Date.now().toString(36)}-${this.counter}`;
-    const displayLabel = label || `Chat ${this.counter}`;
+    const displayLabel = label || generateChatName();
 
     const chatPanel = new ChatPanel(this.extensionUri, panelId, displayLabel);
     this.panels.set(panelId, chatPanel);
@@ -30,7 +31,11 @@ export class ChatPanelManager {
       this.handlePanelClosed(panelId);
     });
 
-    this.orchestrator.getBridge().registerTarget(panelId, chatPanel);
+    const bridge = this.orchestrator.getBridge();
+    bridge.registerTarget(panelId, chatPanel);
+    // Pre-create the slice so the webview's 'ready' message gets a valid sync
+    // even before createInteractiveAgent completes its async work.
+    bridge.ensureSlice(panelId, { provider: 'loading', model: 'initializing...', isLocal: false });
 
     this.orchestrator.createInteractiveAgent(panelId, displayLabel).catch((err) => {
       logger.error(`Failed to create interactive agent for panel ${panelId}`, err);
@@ -45,6 +50,10 @@ export class ChatPanelManager {
   async restoreAll(): Promise<void> {
     const metas = await this.sessionStore.loadPanelIndex();
     for (const meta of metas) {
+      if (this.panels.has(meta.panelId)) {
+        logger.info(`Skipping already-revived panel: ${meta.panelId}`);
+        continue;
+      }
       try {
         const chatPanel = new ChatPanel(this.extensionUri, meta.panelId, meta.label);
         this.panels.set(meta.panelId, chatPanel);
@@ -57,7 +66,9 @@ export class ChatPanelManager {
           this.handlePanelClosed(meta.panelId);
         });
 
-        this.orchestrator.getBridge().registerTarget(meta.panelId, chatPanel);
+        const bridge = this.orchestrator.getBridge();
+        bridge.registerTarget(meta.panelId, chatPanel);
+        bridge.ensureSlice(meta.panelId, { provider: 'loading', model: 'initializing...', isLocal: false });
 
         await this.orchestrator.createInteractiveAgent(meta.panelId, meta.label);
         logger.info(`Restored chat panel: ${meta.panelId}`);
@@ -65,6 +76,7 @@ export class ChatPanelManager {
         logger.warn(`Failed to restore chat panel ${meta.panelId}`, err);
       }
     }
+    this.persistIndex();
   }
 
   revivePanel(panelId: string, label: string, existingPanel: vscode.WebviewPanel): void {
@@ -79,7 +91,9 @@ export class ChatPanelManager {
       this.handlePanelClosed(panelId);
     });
 
-    this.orchestrator.getBridge().registerTarget(panelId, chatPanel);
+    const bridge = this.orchestrator.getBridge();
+    bridge.registerTarget(panelId, chatPanel);
+    bridge.ensureSlice(panelId, { provider: 'loading', model: 'initializing...', isLocal: false });
 
     this.orchestrator.createInteractiveAgent(panelId, label).catch((err) => {
       logger.error(`Failed to create interactive agent for revived panel ${panelId}`, err);
@@ -115,6 +129,13 @@ export class ChatPanelManager {
 
   focusPanel(panelId: string): void {
     this.panels.get(panelId)?.reveal();
+  }
+
+  renamePanel(panelId: string, title: string): void {
+    const panel = this.panels.get(panelId);
+    if (!panel) return;
+    panel.setTitle(title);
+    this.persistIndex();
   }
 
   disposeAll(): void {

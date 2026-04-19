@@ -15,6 +15,16 @@ export const COMMANDS = {
   EXPLAIN_CODE: 'clodcode.explainCode',
   REFACTOR_CODE: 'clodcode.refactorCode',
   WRITE_TESTS: 'clodcode.writeTests',
+  // Explorer context menu commands
+  EXPLORER_OPEN_FILE: 'clodcode.explorer.openFile',
+  EXPLORER_DELETE_FILE: 'clodcode.explorer.deleteFile',
+  EXPLORER_REVEAL_IN_FINDER: 'clodcode.explorer.revealInFinder',
+  EXPLORER_COPY_PATH: 'clodcode.explorer.copyPath',
+  EXPLORER_COPY_RELATIVE_PATH: 'clodcode.explorer.copyRelativePath',
+  EXPLORER_CANCEL_TASK: 'clodcode.explorer.cancelTask',
+  EXPLORER_COPY_TASK_RESULT: 'clodcode.explorer.copyTaskResult',
+  EXPLORER_RERUN_TASK: 'clodcode.explorer.rerunTask',
+  EXPLORER_FOCUS_TASK: 'clodcode.explorer.focusTask',
 } as const;
 
 export const ENV_KEY_MAP: Record<string, string> = {
@@ -25,6 +35,7 @@ export const ENV_KEY_MAP: Record<string, string> = {
   'vertex-anthropic': 'ANTHROPIC_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
+  'azure-openai': 'AZURE_OPENAI_API_KEY',
   ollama: '',
   lmstudio: '',
 };

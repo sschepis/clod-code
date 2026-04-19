@@ -223,6 +223,37 @@ export class SessionStore {
     }
   }
 
+  // ── UI events persistence ──────────────────────────────────────────
+
+  async saveUiEvents(events: unknown[]): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${this.windowId}.events.json`);
+    const data = JSON.stringify(events);
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), new TextEncoder().encode(data));
+  }
+
+  async loadUiEvents(): Promise<unknown[] | undefined> {
+    const myPath = path.join(this.storageDir, `${this.windowId}.events.json`);
+    const mine = await this.tryReadJson(myPath) as unknown[] | undefined;
+    if (mine) return mine;
+    const lastId = this.workspaceState.get<string>(LAST_WINDOW_ID_KEY);
+    if (lastId && lastId !== this.windowId) {
+      return await this.tryReadJson(path.join(this.storageDir, `${lastId}.events.json`)) as unknown[] | undefined;
+    }
+    return undefined;
+  }
+
+  async savePanelUiEvents(panelId: string, events: unknown[]): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${panelId}.events.json`);
+    const data = JSON.stringify(events);
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), new TextEncoder().encode(data));
+  }
+
+  async loadPanelUiEvents(panelId: string): Promise<unknown[] | undefined> {
+    return this.tryReadJson(path.join(this.storageDir, `${panelId}.events.json`)) as Promise<unknown[] | undefined>;
+  }
+
   dispose(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     for (const timer of this.panelSaveTimers.values()) clearTimeout(timer);

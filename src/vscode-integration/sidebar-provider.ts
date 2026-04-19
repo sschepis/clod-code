@@ -79,7 +79,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
    */
   public focus() {
     if (this._view) {
-      this._view.show(true);
+      this._view.show(false);
+    } else {
+      vscode.commands.executeCommand(`${SidebarProvider.viewType}.focus`);
     }
   }
 
@@ -115,7 +117,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       style-src ${webview.cspSource} 'unsafe-inline';
       script-src 'nonce-${nonce}' ${webview.cspSource};
       img-src ${webview.cspSource} blob: data:;
-      font-src ${webview.cspSource};">
+      font-src ${webview.cspSource};
+      frame-src blob:;">
   <link rel="stylesheet" href="${styleUri}">
   <link rel="stylesheet" href="${indexStyleUri}">
   <link rel="modulepreload" href="${sharedUri}">

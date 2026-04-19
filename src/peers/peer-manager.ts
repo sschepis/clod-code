@@ -5,6 +5,8 @@ import {
   currentWindowId,
   listActiveWindows,
   updateWindowPresence,
+  getPresenceDirPath,
+  listPresenceFilesRaw,
   type WindowPresence,
 } from '../shared/window-id';
 import {
@@ -23,6 +25,7 @@ import { PeerClient } from './peer-client';
 
 const DISCOVERY_INTERVAL_MS = 5_000;
 const PEER_STALE_MS = 45_000;   // heartbeat is 15s → 3 missed = dead
+const INFO_POLL_INTERVAL_MS = 15_000; // fallback polling when SSE is broken
 
 export interface PeerSnapshot {
   windowId: string;
@@ -86,6 +89,7 @@ export class PeerManager {
   private readonly server: PeerServer;
   private readonly clients = new Map<string, ClientRecord>();
   private discoveryTimer?: NodeJS.Timeout;
+  private infoPollTimer?: NodeJS.Timeout;
   private stopping = false;
   private readonly onPeersChanged?: (peers: PeerSnapshot[]) => void;
   private readonly askWaiters = new Map<string, AskWaiter>();
@@ -138,7 +142,10 @@ export class PeerManager {
   async start(): Promise<void> {
     const port = await this.server.start();
     updateWindowPresence({ coordPort: port });
+    logger.info(`[peers] peer manager started — server on port ${port}, discovery interval ${DISCOVERY_INTERVAL_MS}ms`);
     this.discoveryTimer = setInterval(() => this.discover(), DISCOVERY_INTERVAL_MS);
+    // Periodic /info polling as fallback when SSE connections fail
+    this.infoPollTimer = setInterval(() => this.pollAllPeersInfo(), INFO_POLL_INTERVAL_MS);
     // Kick off an immediate discovery so peers show up without the 5s wait.
     this.discover();
   }
@@ -147,6 +154,8 @@ export class PeerManager {
     this.stopping = true;
     if (this.discoveryTimer) clearInterval(this.discoveryTimer);
     this.discoveryTimer = undefined;
+    if (this.infoPollTimer) clearInterval(this.infoPollTimer);
+    this.infoPollTimer = undefined;
     for (const [, rec] of this.clients) {
       if (rec.retryTimer) clearTimeout(rec.retryTimer);
       rec.client.abort();
@@ -359,17 +368,87 @@ export class PeerManager {
     return fresh.sort((a, b) => a.startedAt - b.startedAt);
   }
 
+  /** Comprehensive diagnostic state for debugging peer discovery. */
+  debugState(): {
+    selfId: string;
+    serverPort: number;
+    presenceDir: string | null;
+    presenceFiles: ReturnType<typeof listPresenceFilesRaw>;
+    activeWindows: WindowPresence[];
+    clientCount: number;
+    clients: Array<{
+      windowId: string;
+      pid: number;
+      coordPort: number;
+      lastSeen: number;
+      lastSeenAgo: number;
+      stale: boolean;
+      agentCount: number;
+      backoffMs: number;
+    }>;
+    peers: PeerSnapshot[];
+  } {
+    const now = Date.now();
+    const clientDetails: Array<{
+      windowId: string;
+      pid: number;
+      coordPort: number;
+      lastSeen: number;
+      lastSeenAgo: number;
+      stale: boolean;
+      agentCount: number;
+      backoffMs: number;
+    }> = [];
+    for (const [, rec] of this.clients) {
+      clientDetails.push({
+        windowId: rec.snapshot.windowId,
+        pid: rec.snapshot.pid,
+        coordPort: rec.snapshot.coordPort,
+        lastSeen: rec.snapshot.lastSeen,
+        lastSeenAgo: now - rec.snapshot.lastSeen,
+        stale: (now - rec.snapshot.lastSeen) > PEER_STALE_MS,
+        agentCount: rec.snapshot.agents.length,
+        backoffMs: rec.backoffMs,
+      });
+    }
+    return {
+      selfId: currentWindowId(),
+      serverPort: this.server.getPort(),
+      presenceDir: getPresenceDirPath(),
+      presenceFiles: listPresenceFilesRaw(),
+      activeWindows: listActiveWindows(),
+      clientCount: this.clients.size,
+      clients: clientDetails,
+      peers: this.listPeers(),
+    };
+  }
+
   // ── Discovery ──────────────────────────────────────────────────────
 
   private discover(): void {
     const meId = currentWindowId();
-    const alive = listActiveWindows().filter((w) => w.windowId !== meId && w.coordPort);
+    const allActive = listActiveWindows();
+    const alive = allActive.filter((w) => w.windowId !== meId && w.coordPort);
+
+    // Log discovery results periodically (every ~30s to avoid spam)
+    const shouldLog = Math.random() < 0.17; // ~1 in 6 calls = every ~30s
+    if (shouldLog || alive.length > 0) {
+      logger.info(
+        `[peers] discover: ${allActive.length} active window(s), ` +
+        `${alive.length} peer(s) with coordPort, ` +
+        `${this.clients.size} existing client(s)`
+      );
+    }
 
     const aliveIds = new Set(alive.map((w) => w.windowId));
 
     // Connect to any peers we don't already have a client for.
     for (const info of alive) {
       if (this.clients.has(info.windowId)) continue;
+      logger.info(
+        `[peers] discover: new peer found — ${info.windowId.slice(0, 8)} ` +
+        `(pid=${info.pid}, port=${info.coordPort}), connecting...`
+      );
       this.connect(info);
     }
 
@@ -378,6 +457,7 @@ export class PeerManager {
     for (const id of [...this.clients.keys()]) {
       if (!aliveIds.has(id)) {
         const rec = this.clients.get(id)!;
+        logger.info(`[peers] discover: peer ${id.slice(0, 8)} no longer in presence directory, removing`);
         if (rec.retryTimer) clearTimeout(rec.retryTimer);
         rec.client.abort();
         this.clients.delete(id);
@@ -389,6 +469,7 @@ export class PeerManager {
 
   private connect(info: WindowPresence): void {
     if (!info.coordPort || this.stopping) return;
+    logger.info(`[peers] connecting to peer ${info.windowId.slice(0, 8)} on port ${info.coordPort}`);
     const snapshot: PeerSnapshot = {
       windowId: info.windowId,
       pid: info.pid,
@@ -415,8 +496,18 @@ export class PeerManager {
       if (agents && this.clients.get(info.windowId) === rec) {
         rec.snapshot.agents = agents;
         rec.snapshot.lastSeen = Date.now();
+        logger.info(
+          `[peers] fetched /info from ${info.windowId.slice(0, 8)}: ` +
+          `${agents.length} agent(s)`
+        );
+        this.emit();
       }
-    }).catch(() => { /* ignore — SSE will populate */ });
+    }).catch((err) => {
+      logger.warn(
+        `[peers] /info fetch failed for ${info.windowId.slice(0, 8)}: ` +
+        `${err instanceof Error ? err.message : err}`
+      );
+    });
 
     rec.client.start();
     this.emit();
@@ -428,6 +519,15 @@ export class PeerManager {
     let changed = false;
     switch (event.type) {
       case 'hello':
+        logger.info(
+          `[peers] SSE hello from ${rec.info.windowId.slice(0, 8)} — ` +
+          `${Array.isArray(event.agents) ? event.agents.length : 0} agent(s)`
+        );
+        if (Array.isArray(event.agents)) {
+          rec.snapshot.agents = event.agents;
+          changed = true;
+        }
+        break;
       case 'agents_changed':
         if (Array.isArray(event.agents)) {
           rec.snapshot.agents = event.agents;
@@ -437,6 +537,7 @@ export class PeerManager {
       case 'heartbeat':
         break;
       case 'goodbye':
+        logger.info(`[peers] SSE goodbye from ${rec.info.windowId.slice(0, 8)}`);
         rec.client.abort();
         this.clients.delete(rec.info.windowId);
         changed = true;
@@ -493,7 +594,11 @@ export class PeerManager {
 
   private onPeerClose(rec: ClientRecord, err?: Error): void {
     if (this.stopping) return;
-    if (err) logger.info(`[peers] connection to ${rec.info.windowId} closed: ${err.message}`);
+    logger.info(
+      `[peers] connection to ${rec.info.windowId.slice(0, 8)} closed` +
+      (err ? `: ${err.message}` : ' (clean)') +
+      `, retrying in ${rec.backoffMs}ms`
+    );
     // Try to reconnect with backoff — the peer may just be briefly unavailable.
     if (rec.retryTimer) clearTimeout(rec.retryTimer);
     rec.retryTimer = setTimeout(() => {
@@ -501,11 +606,15 @@ export class PeerManager {
       // Only reconnect if the peer is still in the presence directory.
       const still = listActiveWindows().find((w) => w.windowId === rec.info.windowId);
       if (!still) {
+        logger.info(`[peers] peer ${rec.info.windowId.slice(0, 8)} gone from presence dir — removing client`);
         this.clients.delete(rec.info.windowId);
         return;
       }
       rec.info = still;
       rec.snapshot.coordPort = still.coordPort ?? rec.snapshot.coordPort;
+      // Peer is still alive — update lastSeen so it doesn't go stale during reconnect attempts
+      rec.snapshot.lastSeen = Date.now();
+      logger.info(`[peers] retrying connection to ${rec.info.windowId.slice(0, 8)} on port ${rec.snapshot.coordPort}`);
       rec.client = new PeerClient({
         port: rec.snapshot.coordPort,
         onEvent: (e) => this.onPeerEvent(rec, e),
@@ -514,6 +623,23 @@ export class PeerManager {
       rec.backoffMs = Math.min(rec.backoffMs * 2, 10_000);
       rec.client.start();
     }, rec.backoffMs);
+  }
+
+  /** Fallback: periodically poll /info on all connected peers to keep
+   *  lastSeen fresh even if SSE is broken. */
+  private pollAllPeersInfo(): void {
+    if (this.stopping) return;
+    for (const [id, rec] of this.clients) {
+      if (id === currentWindowId()) continue;
+      this.fetchInfoOnce(rec.info).then((agents) => {
+        if (!agents) return;
+        const current = this.clients.get(id);
+        if (current !== rec) return;
+        rec.snapshot.agents = agents;
+        rec.snapshot.lastSeen = Date.now();
+        this.emit();
+      }).catch(() => { /* best-effort fallback */ });
+    }
   }
 
   private postJson(port: number, pathname: string, body: string): Promise<{ statusCode: number; body: string }> {

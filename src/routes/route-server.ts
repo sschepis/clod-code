@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Worker } from 'worker_threads';
 import { logger } from '../shared/logger';
 import { scanRoutes, type RouteEntry } from './route-loader';
@@ -35,7 +36,8 @@ export class RouteServer {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.worker = new Worker(__filename, {
+      const workerPath = path.join(__dirname, 'route-worker.js');
+      this.worker = new Worker(workerPath, {
         workerData: {
           type: 'route-worker',
           workspaceRoot: this.opts.workspaceRoot,

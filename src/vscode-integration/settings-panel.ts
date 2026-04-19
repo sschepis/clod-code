@@ -257,7 +257,7 @@ export class SettingsPanel {
     const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
     const keys: (keyof SettingsState)[] = [
       'localProvider', 'localModel', 'localBaseUrl',
-      'remoteProvider', 'remoteModel', 'remoteApiKey',
+      'remoteProvider', 'remoteModel', 'remoteApiKey', 'remoteBaseUrl',
       'permissionMode', 'maxIterations', 'maxContextTokens',
       'triageEnabled', 'autoCompact', 'autoCompactThreshold',
       'instructionFile',

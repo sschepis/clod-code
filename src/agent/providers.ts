@@ -12,6 +12,27 @@ export interface ProviderPair {
   remoteModelName: string;
 }
 
+async function createAzureOpenAIProvider(config: {
+  apiKey: string;
+  endpoint?: string;
+  deployment?: string;
+  apiVersion?: string;
+}): Promise<BaseProvider> {
+  const provider = await createProvider('openai' as ProviderName, {
+    apiKey: config.apiKey || 'azure',
+  } as any);
+
+  const { AzureOpenAI } = await import('openai');
+  (provider as any).client = new AzureOpenAI({
+    apiKey: config.apiKey,
+    endpoint: config.endpoint || undefined,
+    deployment: config.deployment || undefined,
+    apiVersion: config.apiVersion || '2024-10-21',
+  });
+
+  return provider;
+}
+
 /**
  * Create a pair of LLM providers from extension settings.
  * Resolves API keys from settings, then environment variables.
@@ -104,10 +125,27 @@ export async function createProviders(settings: ClodcodeSettings): Promise<Provi
   const remoteConfig: Record<string, unknown> = {
     apiKey: remoteApiKey,
   };
+  const remoteBaseUrl = settings.remoteBaseUrl?.trim();
+  if (remoteBaseUrl) {
+    remoteConfig.baseUrl = remoteBaseUrl;
+  }
 
   // ── Create providers via llm-wrapper factory ──
-  const local = await createProvider(effectiveLocalProvider as ProviderName, localConfig as any);
-  const remote = await createProvider(settings.remoteProvider as ProviderName, remoteConfig as any);
+  const local = effectiveLocalProvider === 'azure-openai'
+    ? await createAzureOpenAIProvider({
+        apiKey: localApiKey,
+        endpoint: normalizedLocalBaseUrl,
+        deployment: effectiveLocalModel,
+      })
+    : await createProvider(effectiveLocalProvider as ProviderName, localConfig as any);
+
+  const remote = settings.remoteProvider === 'azure-openai'
+    ? await createAzureOpenAIProvider({
+        apiKey: remoteApiKey,
+        endpoint: remoteBaseUrl,
+        deployment: settings.remoteModel,
+      })
+    : await createProvider(settings.remoteProvider as ProviderName, remoteConfig as any);
 
   return {
     local,

@@ -21,14 +21,16 @@ import {
   createUiMoveHandler, createUiClickHandler, createUiDragHandler,
   createUiTypeHandler, createUiPressHandler,
   createSkillListHandler, createSkillGetHandler,
-  createPeerListHandler, createPeerDispatchHandler, createPeerStatusHandler,
+  createPeerListHandler, createPeerDebugHandler, createPeerDispatchHandler, createPeerStatusHandler,
   createPeerAskHandler, createPeerAskStatusHandler, createPeerCancelHandler,
   createRefactorPipelineHandler, createRefactorRegexHandler,
   createMemoryAddHandler, createMemoryRecallHandler, createMemoryPromoteHandler,
   createMemoryListHandler, createMemoryForgetHandler,
   type AskDeps, type SecretDeps, type AgentToolDeps,
   type SurfaceToolDeps, type RouteToolDeps, type SkillToolDeps,
-  type PeerToolDeps, type MemoryToolDeps,
+  type PeerToolDeps, type MemoryToolDeps, type ShellDeps,
+  createChatSetTitleHandler, type ChatTitleDeps,
+  createSpeakHandler, type ElevenLabsTtsDeps,
 } from '../tools';
 
 export interface ToolTreeResult {
@@ -51,6 +53,12 @@ export interface ToolTreeDeps {
   peer: PeerToolDeps;
   /** Hierarchical memory (conversation/project/global). Optional for tests. */
   memory?: MemoryToolDeps;
+  /** Chat title control — lets the agent rename its conversation window. */
+  chatTitle?: ChatTitleDeps;
+  /** Shell configuration — which shell binary to use for commands. */
+  shell: ShellDeps;
+  /** ElevenLabs TTS — lets the agent speak aloud to the user. */
+  tts?: ElevenLabsTtsDeps;
 }
 
 /**
@@ -141,13 +149,13 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             cwd: { type: 'string', description: 'Working directory' },
             timeout: { type: 'number', description: 'Timeout in ms', default: 30000 },
           },
-          handler: createShellRunHandler(),
+          handler: createShellRunHandler(deps.shell),
         })
         .leaf('background', {
           description: 'Run a command in the background (detached). Returns immediately.',
           requiredArgs: { cmd: { type: 'string', description: 'Shell command to run' } },
           optionalArgs: { cwd: { type: 'string', description: 'Working directory' } },
-          handler: createShellBackgroundHandler(),
+          handler: createShellBackgroundHandler(deps.shell),
         })
         .leaf('terminal', {
           description: 'Send a command to the VS Code integrated terminal.',
@@ -233,6 +241,35 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           },
           handler: createSecretHandler(deps.secret),
         });
+    })
+
+    // ── Chat window control ─────────────────────────────────────────
+    .branch('chat', 'Control the chat window — rename conversations, etc.', (chat) => {
+      chat
+        .leaf('set_title', {
+          description: 'Set the title/name of this chat conversation window. Use this to give the conversation a meaningful name based on what is being discussed or worked on.',
+          requiredArgs: {
+            title: { type: 'string', description: 'The new title for the chat window (max 100 chars)' },
+          },
+          handler: createChatSetTitleHandler(deps.chatTitle ?? { setTitle: () => {} }),
+        });
+    })
+
+    // ── Text-to-speech (ElevenLabs) ──────────────────────────────────
+    .branch('tts', 'Text-to-speech — speak aloud to the user via ElevenLabs', (t) => {
+      if (deps.tts) {
+        t.leaf('speak', {
+          description: 'Speak text aloud to the user using ElevenLabs text-to-speech. Only use when the user has asked you to speak or read something aloud. Requires ELEVENLABS_API_KEY in the environment.',
+          requiredArgs: {
+            text: { type: 'string', description: 'The text to speak aloud' },
+          },
+          optionalArgs: {
+            voice_id: { type: 'string', description: 'ElevenLabs voice ID (default: George)' },
+            model: { type: 'string', description: 'ElevenLabs model (default: eleven_multilingual_v2)' },
+          },
+          handler: createSpeakHandler(deps.tts),
+        });
+      }
     })
 
     // ── Skills (workspace-authored markdown skill files) ───────────
@@ -508,8 +545,12 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     .branch('peer', 'Coordinate with other Clodcode windows on this workspace', (p) => {
       p
         .leaf('list', {
-          description: 'List peer Clodcode windows (other VS Code windows running Clodcode on this workspace) and the agents running in each. Read-only — safe to call any time.',
+          description: 'List peer Clodcode windows (other VS Code windows running Clodcode on this workspace) and the agents running in each. Includes diagnostic info when no peers are found. Read-only — safe to call any time.',
           handler: createPeerListHandler(deps.peer),
+        })
+        .leaf('debug', {
+          description: 'Dump comprehensive peer discovery diagnostic state: presence files, active windows, SSE connections, server port, and filtering details. Use this to diagnose why peers are not visible.',
+          handler: createPeerDebugHandler(deps.peer),
         })
         .leaf('dispatch', {
           description: 'Send a task to a peer window. The peer\'s user must approve before an agent spawns there. Returns an rpc_id you can poll with peer/status. Use peer/list first to see available peers and get their id.',

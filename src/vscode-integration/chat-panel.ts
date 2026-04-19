@@ -10,7 +10,7 @@ export class ChatPanel implements WebviewTarget {
   private _disposeHandler?: () => void;
 
   readonly panelId: string;
-  readonly label: string;
+  label: string;
 
   constructor(
     extensionUri: vscode.Uri,
@@ -74,6 +74,11 @@ export class ChatPanel implements WebviewTarget {
     this.panel.reveal();
   }
 
+  setTitle(title: string): void {
+    this.label = title;
+    this.panel.title = `Chat: ${title}`;
+  }
+
   dispose(): void {
     this.panel.dispose();
   }
@@ -106,7 +111,8 @@ export class ChatPanel implements WebviewTarget {
       style-src ${webview.cspSource} 'unsafe-inline';
       script-src 'nonce-${nonce}' ${webview.cspSource};
       img-src ${webview.cspSource} blob: data:;
-      font-src ${webview.cspSource};">
+      font-src ${webview.cspSource};
+      frame-src blob:;">
   <link rel="stylesheet" href="${styleUri}">
   <link rel="stylesheet" href="${indexStyleUri}">
   <link rel="modulepreload" href="${sharedUri}">
