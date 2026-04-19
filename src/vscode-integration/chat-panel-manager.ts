@@ -8,6 +8,7 @@ import { generateChatName } from '../shared/name-generator';
 export class ChatPanelManager {
   private panels = new Map<string, ChatPanel>();
   private counter = 0;
+  private initialized = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -48,38 +49,28 @@ export class ChatPanelManager {
   }
 
   async restoreAll(): Promise<void> {
-    const metas = await this.sessionStore.loadPanelIndex();
-    for (const meta of metas) {
-      if (this.panels.has(meta.panelId)) {
-        logger.info(`Skipping already-revived panel: ${meta.panelId}`);
-        continue;
-      }
+    this.initialized = true;
+
+    // Create agents for all panels that the serializer already revived.
+    // createInteractiveAgent is idempotent — safe to call even if
+    // revivePanel already triggered it.
+    for (const [panelId, chatPanel] of this.panels) {
       try {
-        const chatPanel = new ChatPanel(this.extensionUri, meta.panelId, meta.label);
-        this.panels.set(meta.panelId, chatPanel);
-
-        chatPanel.onMessage((msg) => {
-          this.orchestrator.handlePanelMessage(meta.panelId, msg);
-        });
-
-        chatPanel.onDispose(() => {
-          this.handlePanelClosed(meta.panelId);
-        });
-
-        const bridge = this.orchestrator.getBridge();
-        bridge.registerTarget(meta.panelId, chatPanel);
-        bridge.ensureSlice(meta.panelId, { provider: 'loading', model: 'initializing...', isLocal: false });
-
-        await this.orchestrator.createInteractiveAgent(meta.panelId, meta.label);
-        logger.info(`Restored chat panel: ${meta.panelId}`);
+        await this.orchestrator.createInteractiveAgent(panelId, chatPanel.label);
+        logger.info(`Ensured agent for revived panel: ${panelId}`);
       } catch (err) {
-        logger.warn(`Failed to restore chat panel ${meta.panelId}`, err);
+        logger.warn(`Failed to create agent for revived panel ${panelId}`, err);
       }
     }
     this.persistIndex();
   }
 
   revivePanel(panelId: string, label: string, existingPanel: vscode.WebviewPanel): void {
+    if (this.panels.has(panelId)) {
+      logger.info(`Panel ${panelId} already exists — skipping duplicate revive`);
+      return;
+    }
+
     const chatPanel = new ChatPanel(this.extensionUri, panelId, label, existingPanel);
     this.panels.set(panelId, chatPanel);
 
@@ -95,9 +86,14 @@ export class ChatPanelManager {
     bridge.registerTarget(panelId, chatPanel);
     bridge.ensureSlice(panelId, { provider: 'loading', model: 'initializing...', isLocal: false });
 
-    this.orchestrator.createInteractiveAgent(panelId, label).catch((err) => {
-      logger.error(`Failed to create interactive agent for revived panel ${panelId}`, err);
-    });
+    // If restoreAll() already ran, create the agent now.
+    // Otherwise restoreAll() will handle it after orchestrator init.
+    if (this.initialized) {
+      this.orchestrator.createInteractiveAgent(panelId, label).catch((err) => {
+        logger.error(`Failed to create interactive agent for revived panel ${panelId}`, err);
+      });
+    }
+    logger.info(`Revived panel: ${panelId}`);
   }
 
   close(panelId: string): void {

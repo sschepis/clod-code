@@ -14,7 +14,7 @@
 import type { Router, SessionManager } from '@sschepis/swiss-army-tool';
 import type { AgentRuntime } from '@sschepis/as-agent';
 
-import type { ClodcodeSettings } from '../config/settings';
+import type { ClodcodeSettings, PromptRole } from '../config/settings';
 import type {
   AgentStatus,
   AgentSummary,
@@ -41,6 +41,8 @@ export interface SpawnOpts {
   label?: string;
   /** Shared batch ID for agents spawned together via agent/batch. */
   batchId?: string;
+  /** Prompt routing role — selects provider/model from promptRouting settings. */
+  role?: PromptRole;
 }
 
 export interface SpawnResult {
@@ -319,6 +321,7 @@ export class AgentManager {
       systemPromptOverride: opts.systemPrompt,
       permissionModeOverride: opts.permissionMode,
       skills: this.skills,
+      role: opts.role,
     });
 
     const summary: AgentSummary = {

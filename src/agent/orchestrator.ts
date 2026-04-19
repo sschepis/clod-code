@@ -775,6 +775,10 @@ export class Orchestrator {
   }
 
   async createInteractiveAgent(panelId: string, label?: string): Promise<void> {
+    if (this.manager.get(panelId)) {
+      logger.info(`Interactive agent "${panelId}" already exists — skipping duplicate creation`);
+      return;
+    }
     const { router } = this.buildToolTreeFor(panelId);
     const session = (await this.sessionStore.loadPanel(panelId)) ?? undefined;
 
@@ -1159,13 +1163,17 @@ export class Orchestrator {
             });
 
             // Spawn background agents concurrently
+            const PROMPT_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer'] as const;
             for (const label of agentsToSpawn) {
               const spawnOpts: any = { task, label };
-              if (label.toLowerCase() === 'local') {
+              const lower = label.toLowerCase();
+              if (lower === 'local') {
                 spawnOpts.model = {
                   provider: this.settings.localProvider,
                   name: this.settings.localModel
                 };
+              } else if ((PROMPT_ROLES as readonly string[]).includes(lower)) {
+                spawnOpts.role = lower;
               }
               this.manager.spawn(spawnOpts);
             }
@@ -1191,16 +1199,20 @@ export class Orchestrator {
             : msg.text;
           
           if (host.isProcessing && agentId === FOREGROUND_AGENT_ID) {
+            const isPlan = msg.mode === 'plan';
             this.bridge.appendEvent(agentId, {
               id: `sys-${Date.now()}`,
               role: 'system',
-              content: 'Main agent is busy. Spawning a local background agent to handle this question concurrently.',
+              content: isPlan
+                ? 'Main agent is busy. Spawning a planner agent to handle this concurrently.'
+                : 'Main agent is busy. Spawning a local background agent to handle this question concurrently.',
               timestamp: now(),
             });
             this.manager.spawn({
               task: inputText,
-              label: 'Secondary Query (Local)',
-              model: {
+              label: isPlan ? 'Planner' : 'Secondary Query (Local)',
+              role: isPlan ? 'planner' : undefined,
+              model: isPlan ? undefined : {
                 provider: this.settings.localProvider,
                 name: this.settings.localModel
               }

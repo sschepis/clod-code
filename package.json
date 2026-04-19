@@ -421,6 +421,66 @@
           "default": true,
           "description": "Allow other Clodcode windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
         },
+        "clodcode.promptRouting": {
+          "type": "object",
+          "default": {
+            "orchestrator": { "provider": "gemini", "model": "gemini-3-flash-preview" },
+            "planner": { "provider": "gemini", "model": "gemini-3.1-pro-preview" },
+            "actor": { "provider": "gemini", "model": "gemini-3-flash-preview" },
+            "summarizer": { "provider": "local", "model": "" }
+          },
+          "markdownDescription": "Route different task roles to specific providers and models. Each role maps to `{ \"provider\": \"...\", \"model\": \"...\" }`.\n\n**Roles:**\n- `orchestrator` — triage/routing decisions (fast, cheap model)\n- `planner` — planning and architecture (strong reasoning model)\n- `actor` — execution and tool use (main workhorse model)\n- `summarizer` — compaction and summarization\n\n**Example:**\n```json\n{\n  \"orchestrator\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" },\n  \"planner\": { \"provider\": \"anthropic\", \"model\": \"claude-sonnet-4-20250514\" },\n  \"actor\": { \"provider\": \"openai\", \"model\": \"gpt-4o\" }\n}\n```\nUnconfigured roles fall back to the default local/remote provider settings.",
+          "properties": {
+            "orchestrator": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string", "description": "Provider name (e.g. anthropic, openai, gemini)" },
+                "model": { "type": "string", "description": "Model name for this provider" }
+              },
+              "required": ["provider", "model"],
+              "description": "Triage/routing decisions — a fast, cheap model works well here"
+            },
+            "planner": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["provider", "model"],
+              "description": "Planning and architecture — use a strong reasoning model"
+            },
+            "actor": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["provider", "model"],
+              "description": "Execution and tool use — the main workhorse model"
+            },
+            "summarizer": {
+              "type": "object",
+              "properties": {
+                "provider": { "type": "string" },
+                "model": { "type": "string" }
+              },
+              "required": ["provider", "model"],
+              "description": "Compaction and summarization tasks. Set provider to \"local\" to use the configured local LLM (Ollama/LM Studio)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "clodcode.roundRobinEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Rotate the remote provider across all configured providers on each request. Requires roundRobinModels to map each provider to a model name."
+        },
+        "clodcode.roundRobinModels": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "description": "Per-provider model names for round-robin rotation. Example: { \"anthropic\": \"claude-sonnet-4-20250514\", \"openai\": \"gpt-4o\", \"gemini\": \"gemini-2.0-flash\" }. Only providers listed here (with valid API keys) participate in rotation."
+        },
         "clodcode.shell": {
           "type": "string",
           "default": "",

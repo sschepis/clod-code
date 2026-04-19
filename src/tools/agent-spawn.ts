@@ -1,3 +1,4 @@
+import type { PromptRole } from '../config/settings';
 import type { AgentToolDeps } from './agent-deps';
 
 /**
@@ -8,6 +9,7 @@ import type { AgentToolDeps } from './agent-deps';
  *   systemPrompt (optional) override the agent's system prompt
  *   provider     (optional) remote provider override (e.g. "gemini")
  *   model        (optional) remote model override (e.g. "gemini-2.0-flash")
+ *   role         (optional) prompt routing role: "orchestrator", "planner", "actor", "summarizer"
  *   budget_usd   (optional) per-agent USD budget ceiling
  *   timeout_ms   (optional) per-agent timeout in ms
  *   await        (optional, boolean) wait for completion; default false
@@ -31,11 +33,15 @@ export function createAgentSpawnHandler(deps: AgentToolDeps) {
         : undefined;
     const shouldAwait = kwargs.await === true;
     const label = typeof kwargs.label === 'string' ? kwargs.label : undefined;
+    const VALID_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer'] as const;
+    const rawRole = typeof kwargs.role === 'string' ? kwargs.role.trim().toLowerCase() : '';
+    const role = (VALID_ROLES as readonly string[]).includes(rawRole) ? rawRole as PromptRole : undefined;
 
     const result = await deps.manager.spawn({
       task,
       systemPrompt,
       model: provider || model ? { provider, name: model } : undefined,
+      role,
       budgetUsd,
       timeoutMs,
       parentId: deps.callerId() === 'foreground' ? undefined : deps.callerId(),

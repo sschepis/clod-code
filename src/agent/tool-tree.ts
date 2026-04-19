@@ -675,6 +675,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             systemPrompt: { type: 'string', description: 'Override the system prompt for this agent' },
             provider: { type: 'string', description: 'Provider override, e.g. "gemini", "anthropic"' },
             model: { type: 'string', description: 'Model override, e.g. "claude-haiku-4-5-20251001"' },
+            role: { type: 'string', description: 'Prompt routing role: "planner", "actor", "summarizer". Uses the provider/model configured in promptRouting settings for that role.' },
             budget_usd: { type: 'number', description: 'USD budget ceiling; agent is cancelled if exceeded' },
             timeout_ms: { type: 'number', description: 'Timeout in milliseconds' },
             await: { type: 'boolean', description: 'Wait for completion and return the result; default false' },

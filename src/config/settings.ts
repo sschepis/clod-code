@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import { EXTENSION_ID } from '../shared/constants';
 
+export interface PromptRouteEntry {
+  provider: string;
+  model: string;
+}
+
+export type PromptRole = 'orchestrator' | 'planner' | 'actor' | 'summarizer';
+
 export interface ClodcodeSettings {
   localProvider: string;
   localModel: string;
@@ -30,6 +37,13 @@ export interface ClodcodeSettings {
   // ── Peer coordination ────────────────────────────────────────────
   /** When false, incoming peer dispatch/ask requests are silently rejected. */
   peerDispatchEnabled: boolean;
+  // ── Prompt routing ────────────────────────────────────────────────
+  /** Per-role provider+model overrides. Roles: orchestrator, planner, actor, summarizer. */
+  promptRouting: Partial<Record<PromptRole, PromptRouteEntry>>;
+  // ── Round-robin ───────────────────────────────────────────────────
+  roundRobinEnabled: boolean;
+  /** Per-provider model overrides for round-robin, e.g. { "openai": "gpt-4o", "anthropic": "claude-sonnet-4-20250514" } */
+  roundRobinModels: Record<string, string>;
   // ── Shell ────────────────────────────────────────────────────────
   shell: string;
 }
@@ -61,6 +75,14 @@ export function getSettings(): ClodcodeSettings {
     surfacesAutoOpen: cfg.get<boolean>('surfacesAutoOpen', true),
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
+    promptRouting: cfg.get<Partial<Record<PromptRole, PromptRouteEntry>>>('promptRouting', {
+      orchestrator: { provider: 'gemini', model: 'gemini-3-flash-preview' },
+      planner: { provider: 'gemini', model: 'gemini-3.1-pro-preview' },
+      actor: { provider: 'gemini', model: 'gemini-3-flash-preview' },
+      summarizer: { provider: 'local', model: '' },
+    }),
+    roundRobinEnabled: cfg.get<boolean>('roundRobinEnabled', false),
+    roundRobinModels: cfg.get<Record<string, string>>('roundRobinModels', {}),
     shell: cfg.get<string>('shell', ''),
   };
 }

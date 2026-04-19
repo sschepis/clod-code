@@ -16,7 +16,7 @@ import type { ObotoAgent as ObotoAgentType } from '@sschepis/oboto-agent';
 import type { Session, AgentRuntime } from '@sschepis/as-agent';
 import type { Router } from '@sschepis/swiss-army-tool';
 
-import type { ClodcodeSettings } from '../config/settings';
+import type { ClodcodeSettings, PromptRole } from '../config/settings';
 import type { ModelInfo } from '../shared/message-types';
 import type { SkillManager } from '../skills/skill-manager';
 import { DEFAULT_MODEL_PRICING, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_PRESERVE_RECENT_MESSAGES } from '../config/defaults';
@@ -64,6 +64,8 @@ export interface AgentHostConfig {
   permissionModeOverride?: PermissionModeLabel;
   /** Optional skill manager — when provided, skills are listed in the system prompt. */
   skills?: SkillManager;
+  /** Prompt routing role — controls which provider/model is used via promptRouting settings. */
+  role?: PromptRole;
 }
 
 // ── AgentHost ───────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ export class AgentHost {
   private systemPromptOverride?: string;
   private permissionModeOverride?: PermissionModeLabel;
   private skills?: SkillManager;
+  private role?: PromptRole;
   private activeModel: ModelInfo;
   private disposed = false;
   private listeners = new Set<HostEventListener>();
@@ -91,6 +94,7 @@ export class AgentHost {
     this.systemPromptOverride = config.systemPromptOverride;
     this.permissionModeOverride = config.permissionModeOverride;
     this.skills = config.skills;
+    this.role = config.role;
     this.activeModel = this.computeActiveModel();
   }
 
@@ -177,7 +181,7 @@ export class AgentHost {
 
       this.activeModel = this.computeActiveModel();
 
-      const providers = await createProviders(this.settings);
+      const providers = await createProviders(this.settings, this.role);
       const systemPrompt =
         this.systemPromptOverride ??
         buildSystemPrompt({
@@ -349,22 +353,34 @@ export class AgentHost {
   }
 
   private computeActiveModel(): ModelInfo {
-    const providerMeta = getProviderMeta(this.settings.remoteProvider);
-    const mismatch = !isModelCompatibleWithProvider(
-      this.settings.remoteModel,
-      this.settings.remoteProvider,
-    );
-    const inferredProvider = mismatch ? inferProviderFromModel(this.settings.remoteModel) : null;
+    // Resolve effective provider/model considering prompt routing
+    const routing = this.settings.promptRouting;
+    let effectiveProvider = this.settings.remoteProvider;
+    let effectiveModel = this.settings.remoteModel;
+
+    if (routing && Object.keys(routing).length > 0) {
+      if (this.role && routing[this.role]) {
+        effectiveProvider = routing[this.role]!.provider;
+        effectiveModel = routing[this.role]!.model;
+      } else if (!this.role && routing.actor) {
+        effectiveProvider = routing.actor.provider;
+        effectiveModel = routing.actor.model;
+      }
+    }
+
+    const providerMeta = getProviderMeta(effectiveProvider);
+    const mismatch = !isModelCompatibleWithProvider(effectiveModel, effectiveProvider);
+    const inferredProvider = mismatch ? inferProviderFromModel(effectiveModel) : null;
     const inferredMeta = inferredProvider ? getProviderMeta(inferredProvider) : null;
 
     return {
-      provider: this.settings.remoteProvider,
-      providerDisplayName: providerMeta?.displayName ?? this.settings.remoteProvider,
-      model: this.settings.remoteModel,
+      provider: effectiveProvider,
+      providerDisplayName: providerMeta?.displayName ?? effectiveProvider,
+      model: effectiveModel,
       isLocal: providerMeta?.isLocal ?? false,
       mismatch,
       mismatchReason: mismatch
-        ? `Model "${this.settings.remoteModel}" looks like ${inferredMeta?.displayName ?? inferredProvider} but provider is set to ${providerMeta?.displayName ?? this.settings.remoteProvider}. Open Settings to fix.`
+        ? `Model "${effectiveModel}" looks like ${inferredMeta?.displayName ?? inferredProvider} but provider is set to ${providerMeta?.displayName ?? effectiveProvider}. Open Settings to fix.`
         : undefined,
       ready: false,
     };

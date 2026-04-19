@@ -1,8 +1,8 @@
-import { createProvider } from '@sschepis/llm-wrapper';
-import type { BaseProvider, ProviderName } from '@sschepis/llm-wrapper';
-import { resolveApiKey, getProviderMeta, normalizeBaseUrl } from '../config/provider-registry';
+import { createProvider, BaseProvider } from '@sschepis/llm-wrapper';
+import type { ProviderName, StandardChatParams, StandardChatResponse, StandardChatChunk, LLMError } from '@sschepis/llm-wrapper';
+import { resolveApiKey, getProviderMeta, getConfiguredProviders, normalizeBaseUrl } from '../config/provider-registry';
 import { inferProviderFromModel, isModelCompatibleWithProvider } from '../config/model-inference';
-import type { ClodcodeSettings } from '../config/settings';
+import type { ClodcodeSettings, PromptRole } from '../config/settings';
 import { logger } from '../shared/logger';
 
 export interface ProviderPair {
@@ -10,6 +10,56 @@ export interface ProviderPair {
   remote: BaseProvider;
   localModelName: string;
   remoteModelName: string;
+}
+
+interface RoundRobinEntry {
+  provider: BaseProvider;
+  modelName: string;
+  providerName: string;
+}
+
+class RoundRobinProvider extends BaseProvider {
+  readonly providerName = 'round-robin';
+  private entries: RoundRobinEntry[];
+  private index = 0;
+
+  constructor(entries: RoundRobinEntry[]) {
+    super({ apiKey: 'round-robin' });
+    this.entries = entries;
+  }
+
+  private next(): RoundRobinEntry {
+    const entry = this.entries[this.index % this.entries.length];
+    this.index++;
+    return entry;
+  }
+
+  currentLabel(): string {
+    const names = this.entries.map(e => `${e.providerName}/${e.modelName}`);
+    return `round-robin [${names.join(', ')}]`;
+  }
+
+  async chat(params: StandardChatParams): Promise<StandardChatResponse> {
+    const entry = this.next();
+    logger.info(`Round-robin → ${entry.providerName}/${entry.modelName}`);
+    return entry.provider.chat({ ...params, model: entry.modelName });
+  }
+
+  stream(params: StandardChatParams): AsyncIterable<StandardChatChunk> {
+    const entry = this.next();
+    logger.info(`Round-robin → ${entry.providerName}/${entry.modelName}`);
+    return entry.provider.stream({ ...params, model: entry.modelName });
+  }
+
+  protected doChat(_params: StandardChatParams): Promise<StandardChatResponse> {
+    throw new Error('RoundRobinProvider delegates via chat(), not doChat()');
+  }
+  protected doStream(_params: StandardChatParams): AsyncIterable<StandardChatChunk> {
+    throw new Error('RoundRobinProvider delegates via stream(), not doStream()');
+  }
+  protected mapError(error: unknown): LLMError {
+    throw error;
+  }
 }
 
 async function createAzureOpenAIProvider(config: {
@@ -34,10 +84,97 @@ async function createAzureOpenAIProvider(config: {
 }
 
 /**
+ * Apply prompt routing overrides to settings.
+ *
+ * For the foreground agent (no role):
+ *   - `orchestrator` route → overrides local (triage) provider/model
+ *   - `actor` route → overrides remote (execution) provider/model
+ *
+ * For spawned agents with an explicit role:
+ *   - That role's route → overrides remote provider/model
+ *   - `orchestrator` route → still applies to local for triage
+ */
+function applyRouteEntry(
+  s: ClodcodeSettings,
+  entry: { provider: string; model: string },
+  slot: 'local' | 'remote',
+  label: string,
+): boolean {
+  // "local" provider sentinel: use the configured local LLM (Ollama/LM Studio)
+  if (entry.provider === 'local') {
+    if (slot === 'remote') {
+      s.remoteProvider = s.localProvider;
+      s.remoteModel = entry.model || s.localModel;
+      s.remoteApiKey = s.localApiKey;
+      s.remoteBaseUrl = s.localBaseUrl;
+    } else {
+      s.localModel = entry.model || s.localModel;
+    }
+    logger.info(`Prompt routing: ${label} → local (${s.localProvider}/${entry.model || s.localModel})`);
+    return true;
+  }
+
+  // Verify the routed provider has an API key before applying
+  const meta = getProviderMeta(entry.provider);
+  if (meta?.requiresApiKey) {
+    const key = resolveApiKey(entry.provider, undefined, s.providerKeys);
+    if (!key) {
+      logger.warn(`Prompt routing: skipping ${label} → ${entry.provider}/${entry.model} (no API key for ${meta.displayName})`);
+      return false;
+    }
+  }
+
+  if (slot === 'local') {
+    s.localProvider = entry.provider;
+    s.localModel = entry.model;
+    s.localApiKey = '';
+    s.localBaseUrl = '';
+  } else {
+    s.remoteProvider = entry.provider;
+    s.remoteModel = entry.model;
+    s.remoteApiKey = '';
+    s.remoteBaseUrl = '';
+  }
+  logger.info(`Prompt routing: ${label} → ${entry.provider}/${entry.model}`);
+  return true;
+}
+
+function applyPromptRouting(settings: ClodcodeSettings, role?: PromptRole): ClodcodeSettings {
+  const routing = settings.promptRouting;
+  if (!routing || Object.keys(routing).length === 0) return settings;
+
+  const s = { ...settings };
+
+  if (routing.orchestrator && settings.triageEnabled) {
+    applyRouteEntry(s, routing.orchestrator, 'local', 'orchestrator');
+  }
+
+  if (role) {
+    const entry = routing[role];
+    if (entry) {
+      applyRouteEntry(s, entry, 'remote', role);
+    }
+  } else {
+    if (routing.actor) {
+      applyRouteEntry(s, routing.actor, 'remote', 'actor');
+    }
+  }
+
+  return s;
+}
+
+/**
  * Create a pair of LLM providers from extension settings.
  * Resolves API keys from settings, then environment variables.
+ *
+ * When `role` is specified, prompt routing overrides are applied:
+ *   - The role's provider/model becomes the remote slot
+ *   - orchestrator routing (if configured) becomes the local slot
  */
-export async function createProviders(settings: ClodcodeSettings): Promise<ProviderPair> {
+export async function createProviders(settings: ClodcodeSettings, role?: PromptRole): Promise<ProviderPair> {
+  // ── Apply prompt routing overrides ──
+  settings = applyPromptRouting(settings, role);
+
   // When triage is disabled, the "local" slot should route to the same
   // powerful model as the remote one. This prevents small local models
   // from producing malformed structured JSON and failing the triage step.
@@ -147,10 +284,76 @@ export async function createProviders(settings: ClodcodeSettings): Promise<Provi
       })
     : await createProvider(settings.remoteProvider as ProviderName, remoteConfig as any);
 
+  // ── Round-robin: wrap remote in a rotating provider if enabled ──
+  if (settings.roundRobinEnabled && Object.keys(settings.roundRobinModels).length > 0) {
+    const rrProvider = await buildRoundRobinProvider(settings, remote);
+    if (rrProvider) {
+      return {
+        local,
+        remote: rrProvider,
+        localModelName: effectiveLocalModel,
+        remoteModelName: `round-robin`,
+      };
+    }
+  }
+
   return {
     local,
     remote,
     localModelName: effectiveLocalModel,
     remoteModelName: settings.remoteModel,
   };
+}
+
+async function buildRoundRobinProvider(
+  settings: ClodcodeSettings,
+  _fallbackRemote: BaseProvider,
+): Promise<RoundRobinProvider | null> {
+  const configured = getConfiguredProviders(settings.providerKeys);
+  const entries: RoundRobinEntry[] = [];
+
+  for (const [providerName, modelName] of Object.entries(settings.roundRobinModels)) {
+    if (!modelName?.trim()) continue;
+    if (!configured.includes(providerName)) {
+      logger.warn(`Round-robin: skipping "${providerName}" — no API key configured`);
+      continue;
+    }
+    const meta = getProviderMeta(providerName);
+    if (!meta) {
+      logger.warn(`Round-robin: skipping unknown provider "${providerName}"`);
+      continue;
+    }
+    if (meta.isLocal) {
+      logger.warn(`Round-robin: skipping local provider "${providerName}"`);
+      continue;
+    }
+
+    const apiKey = resolveApiKey(providerName, undefined, settings.providerKeys);
+    try {
+      const config: Record<string, unknown> = { apiKey };
+      if (providerName === settings.remoteProvider && settings.remoteBaseUrl?.trim()) {
+        config.baseUrl = settings.remoteBaseUrl.trim();
+      }
+      const provider =
+        providerName === 'azure-openai'
+          ? await createAzureOpenAIProvider({ apiKey, endpoint: config.baseUrl as string })
+          : await createProvider(providerName as ProviderName, config as any);
+      entries.push({ provider, modelName: modelName.trim(), providerName });
+      logger.info(`Round-robin: added ${providerName}/${modelName}`);
+    } catch (err) {
+      logger.warn(`Round-robin: failed to create provider "${providerName}": ${err}`);
+    }
+  }
+
+  if (entries.length < 2) {
+    if (entries.length === 1) {
+      logger.warn('Round-robin: only 1 provider available — need at least 2 for rotation. Falling back to single provider.');
+    } else {
+      logger.warn('Round-robin: no valid providers found in roundRobinModels. Falling back to single provider.');
+    }
+    return null;
+  }
+
+  logger.info(`Round-robin enabled with ${entries.length} providers: ${entries.map(e => e.providerName).join(', ')}`);
+  return new RoundRobinProvider(entries);
 }
