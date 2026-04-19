@@ -29,6 +29,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { logger } from '../shared/logger';
 
 export interface SkillMeta {
@@ -65,6 +66,7 @@ export function skillsDir(root: string): string {
 export class SkillManager {
   private skills = new Map<string, Skill>();
   private watcher?: vscode.FileSystemWatcher;
+  private globalWatcher?: vscode.FileSystemWatcher;
   private reloadTimer?: NodeJS.Timeout;
 
   constructor() {
@@ -75,6 +77,8 @@ export class SkillManager {
   dispose(): void {
     this.watcher?.dispose();
     this.watcher = undefined;
+    this.globalWatcher?.dispose();
+    this.globalWatcher = undefined;
     if (this.reloadTimer) {
       clearTimeout(this.reloadTimer);
       this.reloadTimer = undefined;
@@ -134,9 +138,20 @@ export class SkillManager {
    */
   reload(): void {
     this.skills.clear();
+
+    // 1. Load global skills
+    const globalDir = path.join(os.homedir(), '.clodcode', 'skills');
+    this.loadFromDir(globalDir);
+
+    // 2. Load workspace skills (these can override global skills with the same name)
     const root = workspaceRoot();
-    if (!root) return;
-    const dir = skillsDir(root);
+    if (root) {
+      const workspaceDir = skillsDir(root);
+      this.loadFromDir(workspaceDir);
+    }
+  }
+
+  private loadFromDir(dir: string): void {
     if (!fs.existsSync(dir)) return;
 
     try {
@@ -156,9 +171,9 @@ export class SkillManager {
           logger.warn(`Failed to parse skill file "${file}"`, err);
         }
       }
-      logger.info(`SkillManager: loaded ${this.skills.size} skill(s) from ${dir}`);
+      logger.info(`SkillManager: loaded ${this.skills.size} skill(s) after scanning ${dir}`);
     } catch (err) {
-      logger.warn('SkillManager: scan failed', err);
+      logger.warn(`SkillManager: scan failed for ${dir}`, err);
     }
   }
 
@@ -193,17 +208,28 @@ export class SkillManager {
   // ── Watcher ─────────────────────────────────────────────────────────
 
   private installWatcher(): void {
-    if (!vscode.workspace.workspaceFolders?.length) return;
-    this.watcher = vscode.workspace.createFileSystemWatcher(
-      '**/.clodcode/skills/**/*.md',
-    );
     const schedule = () => {
       if (this.reloadTimer) clearTimeout(this.reloadTimer);
       this.reloadTimer = setTimeout(() => this.reload(), 200);
     };
-    this.watcher.onDidCreate(schedule);
-    this.watcher.onDidChange(schedule);
-    this.watcher.onDidDelete(schedule);
+
+    if (vscode.workspace.workspaceFolders?.length) {
+      this.watcher = vscode.workspace.createFileSystemWatcher(
+        '**/.clodcode/skills/**/*.md',
+      );
+      this.watcher.onDidCreate(schedule);
+      this.watcher.onDidChange(schedule);
+      this.watcher.onDidDelete(schedule);
+    }
+
+    const globalPattern = new vscode.RelativePattern(
+      path.join(os.homedir(), '.clodcode', 'skills'),
+      '**/*.md'
+    );
+    this.globalWatcher = vscode.workspace.createFileSystemWatcher(globalPattern);
+    this.globalWatcher.onDidCreate(schedule);
+    this.globalWatcher.onDidChange(schedule);
+    this.globalWatcher.onDidDelete(schedule);
   }
 }
 
