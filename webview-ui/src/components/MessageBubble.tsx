@@ -1,7 +1,8 @@
 import React from 'react';
-import { User, Sparkles } from 'lucide-react';
+import { User, Sparkles, Terminal } from 'lucide-react';
 import { ActionMenu } from './ActionMenu';
 import { MarkdownContent, stripToolCallText } from './MarkdownContent';
+import { ToolResultBlock } from './ToolResultBlock';
 
 interface MessageBubbleProps {
   id: string;
@@ -15,16 +16,33 @@ interface MessageBubbleProps {
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content, timestamp, model, onRevert }) => {
   const isUser = role === 'user';
 
+  let isToolResult = false;
+  let toolName = '';
+  let toolOutput = '';
+
+  if (isUser) {
+    const match = content.match(/^\[Tool result \((.*?)\): ([\s\S]*?)\]\s*$/);
+    if (match) {
+      isToolResult = true;
+      toolName = match[1];
+      toolOutput = match[2];
+    }
+  }
+
   if (!isUser && !stripToolCallText(content)) return null;
 
   return (
     <div className={`group relative flex gap-4 px-6 py-5 border-b border-zinc-800/50 transition-colors ${
-      isUser ? 'bg-zinc-900/50 hover:bg-zinc-900/80' : 'bg-transparent hover:bg-zinc-900/30'
+      isUser ? (isToolResult ? 'bg-transparent hover:bg-zinc-900/30' : 'bg-zinc-900/50 hover:bg-zinc-900/80') : 'bg-transparent hover:bg-zinc-900/30'
     }`}>
       <ActionMenu content={content} onRevert={onRevert} id={id} />
 
       <div className="flex-shrink-0 mt-1">
-        {isUser ? (
+        {isToolResult ? (
+          <div className="w-8 h-8 rounded-full bg-zinc-800/50 text-zinc-400 flex items-center justify-center border border-zinc-700/50">
+            <Terminal size={14} />
+          </div>
+        ) : isUser ? (
           <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center border border-amber-500/30">
             <User size={16} strokeWidth={2.5} />
           </div>
@@ -38,13 +56,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ id, role, content,
       <div className="flex-1 space-y-1 min-w-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-zinc-200">{isUser ? 'You' : 'Agent'}</span>
+            <span className="font-medium text-zinc-200">{isToolResult ? 'System' : isUser ? 'You' : 'Agent'}</span>
             {model && <span className="text-[10px] font-mono text-zinc-600 bg-zinc-800/80 px-1.5 py-0.5 rounded">{model}</span>}
           </div>
           {timestamp && <span className="text-xs text-zinc-500">{timestamp}</span>}
         </div>
         {isUser ? (
-          <div className="text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">{content}</div>
+          isToolResult ? (
+            <ToolResultBlock toolName={toolName} output={toolOutput} />
+          ) : (
+            <div className="text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">{content}</div>
+          )
         ) : (
           <div className="text-zinc-200 leading-relaxed font-sans markdown-body">
             <MarkdownContent content={content} />
