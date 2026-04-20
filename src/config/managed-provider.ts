@@ -9,6 +9,19 @@ import { logger } from '../shared/logger';
 
 export const MANAGED_PROVIDER_ID = 'oboto';
 export const MANAGED_DEFAULT_MODEL = 'qwen2.5-coder:7b';
+export const RECOMMENDED_MANAGED_MODELS = [
+  'qwen2.5-coder:7b',
+  'qwen2.5-coder:14b',
+  'qwen2.5-coder:32b',
+  'deepseek-coder-v2:16b',
+  'deepseek-coder-v2:236b',
+  'llama3.1:8b',
+  'llama3.1:70b',
+  'mistral:7b',
+  'mixtral:8x7b',
+  'phi3:14b'
+];
+
 export const MANAGED_BASE_URL = DEFAULT_LOCAL_BASE_URLS.ollama;
 
 export interface ManagedProviderStatus {
@@ -66,7 +79,7 @@ export async function getManagedProviderModels(): Promise<string[]> {
   return status.availableModels;
 }
 
-export async function ensureManagedProvider(): Promise<ManagedProviderStatus> {
+export async function ensureManagedProvider(targetModel?: string): Promise<ManagedProviderStatus> {
   let status = await getManagedProviderStatus(true);
 
   if (!status.ollamaInstalled) {
@@ -94,12 +107,13 @@ export async function ensureManagedProvider(): Promise<ManagedProviderStatus> {
     }
   }
 
-  if (!status.modelAvailable) {
-    logger.info(`No Ollama models found — auto-pulling ${MANAGED_DEFAULT_MODEL}`);
-    await autoPullModel(MANAGED_DEFAULT_MODEL, status.baseUrl);
+  const modelToEnsure = targetModel || MANAGED_DEFAULT_MODEL;
+  if (!status.availableModels.includes(modelToEnsure)) {
+    logger.info(`Model ${modelToEnsure} not found locally — auto-pulling`);
+    await autoPullModel(modelToEnsure, status.baseUrl);
     const refreshed = await getManagedProviderStatus(true);
-    if (!refreshed.modelAvailable) {
-      throw new Error(`Failed to pull model "${MANAGED_DEFAULT_MODEL}". Check Ollama logs.`);
+    if (!refreshed.availableModels.includes(modelToEnsure)) {
+      throw new Error(`Failed to pull model "${modelToEnsure}". Check Ollama logs.`);
     }
     return refreshed;
   }

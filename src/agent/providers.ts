@@ -82,7 +82,7 @@ async function buildProvider(
   settings: ObotovsSettings,
 ): Promise<BaseProvider> {
   if (providerId === MANAGED_PROVIDER_ID) {
-    const status = await ensureManagedProvider();
+    const status = await ensureManagedProvider(model);
     const baseUrl = normalizeBaseUrl('ollama', status.baseUrl);
     return createProvider('ollama' as ProviderName, {
       apiKey: 'local',

@@ -7,7 +7,7 @@ import type {
 } from '../shared/message-types';
 import { PROVIDERS, getProviderMeta, normalizeBaseUrl } from '../config/provider-registry';
 import { listModelsForProvider, listOllamaModels, isOllamaRunning, pullOllamaModel } from '../config/model-listing';
-import { MANAGED_PROVIDER_ID, getManagedProviderStatus, ensureManagedProvider } from '../config/managed-provider';
+import { MANAGED_PROVIDER_ID, getManagedProviderStatus, ensureManagedProvider, RECOMMENDED_MANAGED_MODELS } from '../config/managed-provider';
 import { ENV_KEY_MAP } from '../shared/constants';
 import { getSettings } from '../config/settings';
 import { logger } from '../shared/logger';
@@ -128,7 +128,7 @@ export class SettingsPanel {
       envKeyVar: '',
       envKeySet: false,
       managed: true,
-      models: managedStatus.availableModels,
+      models: Array.from(new Set([...managedStatus.availableModels, ...RECOMMENDED_MANAGED_MODELS])),
       serviceRunning: managedStatus.ollamaRunning,
     });
 
@@ -245,6 +245,14 @@ export class SettingsPanel {
           `No API key found. Set ${ENV_KEY_MAP[providerConfig.type] || 'the API key'} in your environment or paste it in the API Key field and save.`,
         );
       }
+      if (providerConfig.type.startsWith('vertex-')) {
+        const { execSync } = require('child_process');
+        try {
+          execSync('gcloud auth print-access-token', { stdio: 'ignore' });
+        } catch {
+          throw new Error('Not logged into gcloud. Please run `gcloud auth login` and `gcloud auth application-default login` in your terminal first.');
+        }
+      }
 
       // If no model was selected, try to fetch the list and pick the first one
       let model = modelName;
@@ -255,7 +263,13 @@ export class SettingsPanel {
         } catch { /* fall through */ }
       }
       if (!model) {
-        throw new Error('No model available. Save your API key first, then reopen settings to load the model list.');
+        if (providerConfig.type.startsWith('vertex-')) {
+          throw new Error('No model available. Ensure you are logged into Google Cloud via \'gcloud auth login\' and \'gcloud config set project <your-project>\'.');
+        } else if (providerConfig.type === 'vscode-lm') {
+          throw new Error('No model available. Ensure you have a GitHub Copilot or other VS Code language model extension installed.');
+        } else {
+          throw new Error('No model available. Save your API key first, then reopen settings to load the model list.');
+        }
       }
 
       const config: Record<string, unknown> = { apiKey: apiKey || 'local' };
@@ -295,23 +309,24 @@ export class SettingsPanel {
   }
 
   private async testManagedProvider(modelName: string): Promise<void> {
-    const running = await isOllamaRunning();
-    if (!running) {
-      this.post({
-        type: 'connection_test',
-        providerId: MANAGED_PROVIDER_ID,
-        success: false,
-        message: 'Ollama is not running. Start it and try again.',
-      });
-      return;
-    }
-
     if (!modelName) {
       this.post({
         type: 'connection_test',
         providerId: MANAGED_PROVIDER_ID,
         success: false,
         message: 'No model selected. Pull a model first.',
+      });
+      return;
+    }
+
+    try {
+      await ensureManagedProvider(modelName);
+    } catch (err) {
+      this.post({
+        type: 'connection_test',
+        providerId: MANAGED_PROVIDER_ID,
+        success: false,
+        message: err instanceof Error ? err.message : String(err),
       });
       return;
     }

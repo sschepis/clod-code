@@ -3,37 +3,75 @@ import { ENV_KEY_MAP } from '../shared/constants';
 import type { PickerProviderInfo } from '../shared/message-types';
 import { logger } from '../shared/logger';
 
+import type { ObotovsSettings, ProviderConfig } from './settings';
+import { getManagedProviderStatus, MANAGED_PROVIDER_ID, RECOMMENDED_MANAGED_MODELS } from './managed-provider';
+
 export async function getProviderModels(
-  providerKeys: Record<string, string>,
+  settings: ObotovsSettings,
 ): Promise<PickerProviderInfo[]> {
-  const configured = new Set(getConfiguredProviders(providerKeys));
-
   const results: PickerProviderInfo[] = [];
+  const configuredTypes = new Set<string>();
 
-  const fetches = Object.entries(PROVIDERS).map(async ([name, meta]) => {
-    const isConfigured = configured.has(name);
+  // 1. Add explicitly configured providers
+  const fetches = Object.entries(settings.providers).map(async ([id, config]) => {
+    const meta = PROVIDERS[config.type];
+    if (!meta) return null;
+    configuredTypes.add(config.type);
+
     let models: string[] = [];
-
-    if (isConfigured) {
-      try {
-        const apiKey = resolveKeyForListing(name, providerKeys);
-        models = await listModelsForProvider(name, apiKey, meta.defaultBaseUrl);
-      } catch (err) {
-        logger.debug(`Failed to fetch models for ${name}`, err);
+    try {
+      const apiKey = config.apiKey || process.env[meta.envKeyVar];
+      const baseUrl = config.baseUrl || meta.defaultBaseUrl;
+      models = await listModelsForProvider(config.type, apiKey, baseUrl);
+      
+      // If a defaultModel is set but not in the fetched list, inject it
+      if (config.defaultModel && !models.includes(config.defaultModel)) {
+        models.unshift(config.defaultModel);
       }
+    } catch (err) {
+      logger.debug(`Failed to fetch models for ${id}`, err);
     }
 
     return {
-      name: meta.name,
-      displayName: meta.displayName,
+      name: id, // The ID of the provider instance
+      displayName: config.label || `${meta.displayName} (${id})`,
       isLocal: meta.isLocal,
-      configured: isConfigured,
+      configured: true,
       models,
     };
   });
 
-  const resolved = await Promise.all(fetches);
+  const resolved = (await Promise.all(fetches)).filter(Boolean) as PickerProviderInfo[];
   results.push(...resolved);
+
+  // 2. Add the Managed Provider if it has a model available (or is running)
+  try {
+    const obotoStatus = await getManagedProviderStatus();
+    if (obotoStatus.ollamaInstalled) {
+      results.push({
+        name: MANAGED_PROVIDER_ID,
+        displayName: 'Oboto Local (Managed)',
+        isLocal: true,
+        configured: true,
+        models: Array.from(new Set([...obotoStatus.availableModels, ...RECOMMENDED_MANAGED_MODELS])),
+      });
+    }
+  } catch (err) {
+    logger.debug('Failed to check managed provider status', err);
+  }
+
+  // 3. Add unconfigured standard providers so the user knows they exist
+  for (const [type, meta] of Object.entries(PROVIDERS)) {
+    if (!configuredTypes.has(type)) {
+      results.push({
+        name: type,
+        displayName: meta.displayName,
+        isLocal: meta.isLocal,
+        configured: false,
+        models: [],
+      });
+    }
+  }
 
   results.sort((a, b) => {
     if (a.configured !== b.configured) return a.configured ? -1 : 1;
@@ -62,7 +100,7 @@ export async function listModelsForProvider(
     case 'gemini':
       return listGeminiModels(apiKey);
     case 'deepseek':
-      return listOpenAICompatModels('https://api.deepseek.com', apiKey);
+      return listOpenAICompatModels(baseUrl || 'https://api.deepseek.com', apiKey);
     case 'openrouter':
       return listOpenRouterModels(apiKey);
     case 'azure-openai':
@@ -164,16 +202,26 @@ async function listOpenAICompatModels(baseUrl: string, apiKey?: string): Promise
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/models`;
-  const res = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(5000),
-  });
-  if (!res.ok) return [];
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      logger.error(`Failed to fetch models from ${url}. Status: ${res.status} ${res.statusText}
+Body: ${text}`);
+      return [];
+    }
 
-  const data = await res.json() as { data?: Array<{ id: string }> };
-  return (data.data ?? [])
-    .map(m => m.id)
-    .sort();
+    const data = await res.json() as { data?: Array<{ id: string }> };
+    return (data.data ?? [])
+      .map(m => m.id)
+      .sort();
+  } catch (err) {
+    logger.error(`Error fetching models from ${url}:`, err);
+    return [];
+  }
 }
 
 // ── Anthropic ───────────────────────────────────────────────────────
