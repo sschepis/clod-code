@@ -373,7 +373,7 @@ export class SettingsPanel {
     try {
       this.post({ type: 'model_pull_progress', model: modelName, status: 'Ensuring Ollama is ready...' });
 
-      await ensureManagedProvider();
+      await ensureManagedProvider(modelName);
 
       this.post({ type: 'model_pull_progress', model: modelName, status: 'Starting download...' });
 
