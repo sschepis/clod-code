@@ -29,6 +29,16 @@ export const InputArea: React.FC<InputAreaProps> = ({
   const [inputValue, setInputValue] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
+  const [isInterrupting, setIsInterrupting] = useState(false);
+
+  useEffect(() => {
+    if (!isProcessing) setIsInterrupting(false);
+  }, [isProcessing]);
+
+  const handleInterrupt = () => {
+    setIsInterrupting(true);
+    onInterrupt();
+  };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const preRecordingTextRef = useRef('');
 
@@ -113,8 +123,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
       handleSend();
     }
     if (e.key === 'Escape') {
-      if (isProcessing) {
-        onInterrupt();
+      if (isProcessing && !isInterrupting) {
+        handleInterrupt();
       }
       setShowSlashCommands(false);
     }
@@ -203,7 +213,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               rows={1}
-              placeholder={isProcessing
+              placeholder={isInterrupting
+                ? "Stopping agent..."
+                : isProcessing
                 ? "Agent is working... press Esc to interrupt"
                 : "Give the agent a command, type '/' for actions, or paste images/logs..."
               }
@@ -215,11 +227,17 @@ export const InputArea: React.FC<InputAreaProps> = ({
             <div className="absolute right-2 bottom-2 flex items-center gap-1.5 p-1 bg-zinc-900 rounded-md z-10">
               {isProcessing && (
                 <button
-                  onClick={onInterrupt}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-red-600 hover:bg-red-500 text-white transition-colors shadow-sm shadow-red-900/50"
+                  onClick={handleInterrupt}
+                  disabled={isInterrupting}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors shadow-sm ${
+                    isInterrupting
+                      ? 'bg-red-900/50 text-red-200 cursor-not-allowed shadow-none'
+                      : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/50'
+                  }`}
                   title="Stop the agent (Esc)"
                 >
-                  <Square size={10} fill="currentColor" /> Stop
+                  {isInterrupting ? <Loader2 size={10} className="animate-spin" /> : <Square size={10} fill="currentColor" />}
+                  {isInterrupting ? 'Stopping...' : 'Stop'}
                 </button>
               )}
               <button
