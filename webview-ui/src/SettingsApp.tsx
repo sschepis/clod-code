@@ -18,6 +18,7 @@ const PROVIDER_TYPES = [
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'azure-openai', label: 'Azure OpenAI' },
+  { value: 'vscode-lm', label: 'VS Code Copilot' },
   { value: 'ollama', label: 'Ollama' },
   { value: 'lmstudio', label: 'LM Studio' },
 ];
