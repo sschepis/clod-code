@@ -276,7 +276,7 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["ollama", "lmstudio", "openai", "anthropic", "gemini", "vertex-gemini", "vertex-anthropic", "openrouter", "deepseek", "azure-openai"],
+                "enum": ["ollama", "lmstudio", "openai", "anthropic", "gemini", "vertex-gemini", "vertex-anthropic", "openrouter", "deepseek", "azure-openai", "vscode-lm"],
                 "description": "Provider type"
               },
               "label": {

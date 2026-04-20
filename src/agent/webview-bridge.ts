@@ -194,7 +194,7 @@ export class WebviewBridge {
         ? slice.events.slice(-MAX_EVENTS_PER_SLICE)
         : slice.events;
 
-    this.post({
+    const msg: ExtToWebviewMessage = {
       type: 'sync',
       agentId,
       events,
@@ -204,7 +204,18 @@ export class WebviewBridge {
       mode: slice.mode,
       agents: this.listAgentSummaries(),
       focusedAgentId: focusOverride ?? this.focusedAgentId,
-    });
+    };
+
+    // If this sync targets a dedicated panel, send directly to it
+    // instead of broadcasting — prevents the sidebar from switching
+    // its focus to the new panel's conversation.
+    const panelTarget = this.targets.get(agentId);
+    if (panelTarget && focusOverride) {
+      panelTarget.postMessage(msg);
+      return;
+    }
+
+    this.post(msg);
   }
 
   sendAgentsSync(): void {

@@ -38,6 +38,7 @@ export const ENV_KEY_MAP: Record<string, string> = {
   'azure-openai': 'AZURE_OPENAI_API_KEY',
   ollama: '',
   lmstudio: '',
+  'vscode-lm': '',
 };
 
 export const DEFAULT_LOCAL_BASE_URLS: Record<string, string> = {

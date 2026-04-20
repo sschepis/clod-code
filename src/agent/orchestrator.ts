@@ -21,6 +21,7 @@ import type {
   WebviewToExtMessage, ExtToWebviewMessage, SessionEvent,
   ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo,
   MemoryInfo, ConversationInfo, ObjectCategory, ObjectActionKind,
+  Attachment,
 } from '../shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../shared/message-types';
 
@@ -134,6 +135,15 @@ const PLAN_MODE_PREAMBLE =
 
 function wrapPlanMode(text: string): string {
   return PLAN_MODE_PREAMBLE + text;
+}
+
+function inlineTextAttachments(text: string, attachments?: Attachment[]): string {
+  if (!attachments || attachments.length === 0) return text;
+  const textParts = attachments
+    .filter(a => a.type === 'text' && a.content)
+    .map(a => `\n\n--- ${a.name} ---\n${a.content}\n--- End ${a.name} ---`);
+  if (textParts.length === 0) return text;
+  return text + textParts.join('');
 }
 
 function truncateForMemory(s: string): string {
@@ -1187,7 +1197,8 @@ export class Orchestrator {
 
         if (agentId === FOREGROUND_AGENT_ID && match) {
           const mentionsStr = match[0];
-          const task = msg.text.slice(mentionsStr.length).trim();
+          const rawTask = msg.text.slice(mentionsStr.length).trim();
+          const task = inlineTextAttachments(rawTask, msg.attachments);
           const agentsToSpawn = mentionsStr.match(/@([\w-]+)/g)?.map(m => m.slice(1)) || [];
 
           if (agentsToSpawn.length > 0 && task) {
@@ -1243,10 +1254,11 @@ export class Orchestrator {
             ? this.manager.getForeground()
             : this.manager.get(agentId)?.host;
         if (host) {
+          const baseText = inlineTextAttachments(msg.text, msg.attachments);
           const inputText = msg.mode === 'plan'
-            ? wrapPlanMode(msg.text)
-            : msg.text;
-          
+            ? wrapPlanMode(baseText)
+            : baseText;
+
           if (host.isProcessing && agentId === FOREGROUND_AGENT_ID) {
             const isPlan = msg.mode === 'plan';
             this.bridge.appendEvent(agentId, {
@@ -1267,7 +1279,8 @@ export class Orchestrator {
               })()
             });
           } else {
-            await host.submit(inputText, msg.attachments);
+            const imageAttachments = msg.attachments?.filter(a => a.type === 'image');
+            await host.submit(inputText, imageAttachments);
           }
         } else {
           logger.warn(`Submit ignored — agent "${agentId}" not available`);

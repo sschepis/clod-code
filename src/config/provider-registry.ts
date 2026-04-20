@@ -82,6 +82,13 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     requiresApiKey: true,
     isLocal: false,
   },
+  'vscode-lm': {
+    name: 'vscode-lm',
+    displayName: 'VS Code Copilot',
+    envKeyVar: '',
+    requiresApiKey: false,
+    isLocal: false,
+  },
 };
 
 export function getProviderMeta(providerName: string): ProviderMeta | undefined {

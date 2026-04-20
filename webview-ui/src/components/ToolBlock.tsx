@@ -38,7 +38,33 @@ interface ToolBlockProps {
   status: 'running' | 'success' | 'error';
   output?: string;
   duration?: string;
+  kwargs?: Record<string, unknown>;
   onRevert: (id: string) => void;
+}
+
+function summarizeKwargs(command: string, kwargs?: Record<string, unknown>): string {
+  if (!kwargs || Object.keys(kwargs).length === 0) return '';
+  const cmd = kwargs.command;
+  if (typeof cmd === 'string') return cmd;
+  const path = kwargs.path ?? kwargs.file_path;
+  if (typeof path === 'string') {
+    const pattern = kwargs.pattern ?? kwargs.old_string;
+    if (typeof pattern === 'string') {
+      const short = pattern.length > 40 ? pattern.slice(0, 40) + '…' : pattern;
+      return `${path}  "${short}"`;
+    }
+    return path;
+  }
+  const pattern = kwargs.pattern;
+  if (typeof pattern === 'string') {
+    const scope = kwargs.path ?? kwargs.include ?? kwargs.glob;
+    return typeof scope === 'string' ? `"${pattern}" in ${scope}` : `"${pattern}"`;
+  }
+  const message = kwargs.message;
+  if (typeof message === 'string') return message.length > 60 ? message.slice(0, 60) + '…' : message;
+  const entries = Object.entries(kwargs).filter(([, v]) => typeof v === 'string' || typeof v === 'number');
+  if (entries.length === 0) return '';
+  return entries.slice(0, 3).map(([k, v]) => `${k}=${v}`).join(' ');
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -62,7 +88,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   web_search: <Globe size={14} className="text-teal-400" />,
 };
 
-export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, status, output, duration, onRevert }) => {
+export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, status, output, duration, kwargs, onRevert }) => {
   const autoExpand = AUTO_EXPAND_TOOLS.has(toolName) || AUTO_EXPAND_TOOLS.has(command);
   const [isExpanded, setIsExpanded] = useState(autoExpand);
 
@@ -78,6 +104,7 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
   })();
 
   const displayName = toolName?.replace(/_/g, ' ') || 'tool';
+  const detail = summarizeKwargs(command, kwargs);
 
   return (
     <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 group relative fade-in">
@@ -96,7 +123,7 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
           <span className="text-xs font-semibold text-zinc-300 bg-zinc-800/80 px-2 py-0.5 rounded uppercase tracking-wider">
             {displayName}
           </span>
-          <span className="text-sm text-zinc-500 font-mono truncate">{command}</span>
+          <span className="text-sm text-zinc-500 font-mono truncate">{detail || command}</span>
         </div>
 
         <div className="flex items-center gap-3 pl-2 pr-8 group-hover:pr-24 transition-all">

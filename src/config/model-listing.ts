@@ -71,6 +71,8 @@ export async function listModelsForProvider(
       return listVertexGeminiModels(baseUrl);
     case 'vertex-anthropic':
       return listVertexAnthropicModels(baseUrl);
+    case 'vscode-lm':
+      return listVSCodeLMModels();
     default:
       return [];
   }
@@ -334,6 +336,18 @@ async function listAzureModels(apiKey?: string, baseUrl?: string): Promise<strin
 
 function ollamaRoot(baseUrl?: string): string {
   return (baseUrl || 'http://localhost:11434').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+}
+
+// ── VS Code Language Model API ────────────────────────────────────
+
+async function listVSCodeLMModels(): Promise<string[]> {
+  try {
+    const vscode = await import('vscode');
+    const models = await vscode.lm.selectChatModels();
+    return models.map(m => m.id).sort();
+  } catch {
+    return [];
+  }
 }
 
 function resolveKeyForListing(

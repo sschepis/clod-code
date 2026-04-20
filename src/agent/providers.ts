@@ -5,6 +5,7 @@ import type { ObotovsSettings, PromptRole, ProviderConfig } from '../config/sett
 import { MANAGED_PROVIDER_ID, ensureManagedProvider } from '../config/managed-provider';
 import { ENV_KEY_MAP } from '../shared/constants';
 import { logger } from '../shared/logger';
+import { VSCodeLMProvider } from '../config/vscode-lm-provider';
 
 export interface ProviderPair {
   local: BaseProvider;
@@ -97,6 +98,11 @@ async function buildProvider(
   }
 
   const providerType = providerConfig.type;
+
+  if (providerType === 'vscode-lm') {
+    return new VSCodeLMProvider({ apiKey: 'vscode-lm' });
+  }
+
   const meta = getProviderMeta(providerType);
   if (!meta) {
     throw new Error(`Unknown provider type "${providerType}" for provider "${providerId}".`);

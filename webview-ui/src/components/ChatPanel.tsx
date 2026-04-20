@@ -82,6 +82,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             status={event.status}
             output={event.output}
             duration={event.duration}
+            kwargs={event.kwargs}
             onRevert={onRevert}
           />
         );
