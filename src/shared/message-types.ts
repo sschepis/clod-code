@@ -282,6 +282,7 @@ export interface PickerProviderInfo {
   isLocal: boolean;
   configured: boolean;
   models: string[];
+  availableModels?: string[];
 }
 
 // ── Extension → Webview messages ──────────────────────────────────────
@@ -416,6 +417,7 @@ export interface ProviderOption {
   managed: boolean;
   defaultBaseUrl?: string;
   models: string[];
+  availableModels?: string[];
   /** For the managed provider: whether the backing service (Ollama) is reachable. */
   serviceRunning?: boolean;
 }
@@ -435,3 +437,4 @@ export type SettingsWebviewToExt =
   | { type: 'reset_to_defaults' }
   | { type: 'open_logs' };
 
+// FOREGROUND AGENT: STOP USING CAT | GREP. USE search/grep OR file/read

@@ -129,6 +129,7 @@ export class SettingsPanel {
       envKeySet: false,
       managed: true,
       models: Array.from(new Set([...managedStatus.availableModels, ...RECOMMENDED_MANAGED_MODELS])),
+      availableModels: managedStatus.availableModels,
       serviceRunning: managedStatus.ollamaRunning,
     });
 

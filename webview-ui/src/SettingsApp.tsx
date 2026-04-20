@@ -655,6 +655,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
 }) => {
   const managed = providerOptions.find(p => p.managed);
   const models = managed?.models ?? [];
+  const availableModels = managed?.availableModels ?? [];
   const isRunning = managed?.serviceRunning ?? false;
   const [selectedModel, setSelectedModel] = useState('');
 
@@ -663,6 +664,13 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
       setSelectedModel(models[0]);
     }
   }, [models]);
+  
+  const handleModelChange = (m: string) => {
+    setSelectedModel(m);
+    if (!availableModels.includes(m)) {
+      onPull(m);
+    }
+  };
 
   return (
     <div className="p-4 rounded-lg border border-emerald-900/50 bg-emerald-950/20 space-y-3">
@@ -692,7 +700,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
       <Field label="Model">
         <select
           value={selectedModel}
-          onChange={e => setSelectedModel(e.target.value)}
+          onChange={e => handleModelChange(e.target.value)}
           className="select"
         >
           {models.length === 0 && (
@@ -701,7 +709,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
             </option>
           )}
           {models.map(m => (
-            <option key={m} value={m}>{m}</option>
+            <option key={m} value={m}>{m} {availableModels.includes(m) ? "(Downloaded)" : "(Not downloaded)"}</option>
           ))}
         </select>
       </Field>
@@ -725,7 +733,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
           onClick={() => onTest(selectedModel)}
           testing={testing}
           result={testResult}
-          disabled={!selectedModel}
+          disabled={!selectedModel || pulling || !availableModels.includes(selectedModel)}
         />
         <button
           onClick={() => {
@@ -735,7 +743,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
           disabled={pulling}
           className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50"
         >
-          <Download size={12} /> Pull model
+          <Download size={12} /> Pull custom model
         </button>
       </div>
     </div>
