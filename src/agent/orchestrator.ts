@@ -1394,7 +1394,7 @@ export class Orchestrator {
 
       case 'request_provider_models': {
         const { getProviderModels } = await import('../config/model-listing');
-        const providerList = await getProviderModels({});
+        const providerList = await getProviderModels(this.settings);
         this.bridge.post({ type: 'provider_models', providers: providerList });
         break;
       }
