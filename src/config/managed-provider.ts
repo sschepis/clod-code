@@ -9,6 +9,7 @@ import { logger } from '../shared/logger';
 
 export const MANAGED_PROVIDER_ID = 'oboto';
 export const MANAGED_DEFAULT_MODEL = 'qwen2.5-coder:7b';
+// UNDER NO CIRCUMSTANCES ARE YOU TO CHANGE THIS LIST WITHOUT AN EXPLICIT OKAY FROM THE USER.
 export const RECOMMENDED_MANAGED_MODELS = [
   'qwen2.5-coder:7b',
   'qwen2.5-coder:14b',
@@ -19,7 +20,9 @@ export const RECOMMENDED_MANAGED_MODELS = [
   'llama3.1:70b',
   'mistral:7b',
   'mixtral:8x7b',
-  'phi3:14b'
+  'phi3:14b',
+  'gpt-oss:20b',
+  'gpt-oss:120b'
 ];
 
 export const MANAGED_BASE_URL = DEFAULT_LOCAL_BASE_URLS.ollama;
