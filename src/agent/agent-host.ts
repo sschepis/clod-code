@@ -141,6 +141,10 @@ export class AgentHost {
     return this.agent?.getSession();
   }
 
+  setRouter(router: Router): void {
+    this.router = router;
+  }
+
   getActiveModel(): ModelInfo {
     return this.activeModel;
   }

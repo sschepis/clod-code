@@ -81,3 +81,6 @@ export { createChatSetTitleHandler } from './chat-title';
 export type { ChatTitleDeps } from './chat-title';
 export { createSpeakHandler } from './elevenlabs-tts';
 export type { ElevenLabsTtsDeps } from './elevenlabs-tts';
+export { createPlanProposeHandler } from './plan-propose';
+export { createSystemReloadHandler } from './system-reload';
+export { createSystemObserveHandler, pushSubconsciousEvent } from './system-observe';

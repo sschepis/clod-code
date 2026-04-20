@@ -413,6 +413,21 @@ export class AgentManager {
 
   getBridge() { return this.bridge; }
 
+
+  reloadToolTree(agentId: string): boolean {
+    const id = agentId === 'foreground' ? 'foreground' : agentId;
+    const record = this.instances.get(id);
+    if (!record) return false;
+    try {
+      const { router } = this.toolTreeFactory(id);
+      record.host.setRouter(router);
+      return true;
+    } catch (err) {
+      console.error('Failed to reload tool tree:', err);
+      return false;
+    }
+  }
+
   get(agentId: string): InstanceRecord | undefined {
     return this.instances.get(agentId);
   }

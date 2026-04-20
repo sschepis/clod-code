@@ -1,4 +1,4 @@
-# Obotovs
+# Oboto VS
 
 Multi-LLM AI coding assistant for VS Code with background agents, hierarchical memory, peer coordination, and a full tool ecosystem.
 

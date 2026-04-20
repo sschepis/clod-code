@@ -28,6 +28,7 @@ import { AgentHost } from './agent-host';
 import { AgentManager } from './agent-manager';
 import { WebviewBridge } from './webview-bridge';
 import { buildToolTree } from './tool-tree';
+import { pushSubconsciousEvent } from '../tools';
 import { SessionStore } from './session-store';
 import { getUserPromptBridge } from './user-prompt-bridge';
 import { getAgentRuntime } from './runtime';
@@ -807,7 +808,26 @@ export class Orchestrator {
       skills: this.skillManager,
     });
 
+
     this.manager.registerInteractive(panelId, host);
+
+    // Spawn the subconscious observer!
+    const observerTask = "You are the subconscious observer. Loop system/observe. Update memory and warn the foreground agent if they make a mistake.";
+    this.manager.spawn({
+      task: observerTask,
+      label: 'Subconscious',
+      role: 'summarizer',
+      parentId: host.id
+    }).then(spawnRes => {
+      if (spawnRes.ok) {
+        host.on((event) => {
+          if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
+            pushSubconsciousEvent(spawnRes.agentId, event);
+          }
+        });
+      }
+    });
+
     await host.initialize(session);
 
     // Restore saved UI events into the bridge slice
@@ -901,7 +921,26 @@ export class Orchestrator {
       skills: this.skillManager,
     });
 
+
     this.manager.registerForeground(host);
+
+    // Spawn the subconscious observer for foreground!
+    const observerTask = "You are the subconscious observer. Loop system/observe. Update memory and warn the foreground agent if they make a mistake.";
+    this.manager.spawn({
+      task: observerTask,
+      label: 'Subconscious',
+      role: 'summarizer',
+      parentId: FOREGROUND_AGENT_ID
+    }).then(spawnRes => {
+      if (spawnRes.ok) {
+        host.on((event) => {
+          if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
+            pushSubconsciousEvent(spawnRes.agentId, event);
+          }
+        });
+      }
+    });
+
     await host.initialize(session);
 
     // Restore saved UI events into the bridge slice so the chat shows history

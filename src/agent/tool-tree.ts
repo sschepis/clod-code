@@ -1,3 +1,6 @@
+import { createSystemObserveHandler } from '../tools/system-observe';
+import { createSystemReloadHandler } from '../tools/system-reload';
+import { loadDynamicTools } from './dynamic-tools';
 import { TreeBuilder, SessionManager, Router, BranchNode, LeafNode } from '@sschepis/swiss-army-tool';
 import {
   createFileReadHandler, createFileWriteHandler, createFileEditHandler,
@@ -32,6 +35,7 @@ import {
   type PeerToolDeps, type MemoryToolDeps, type ShellDeps,
   createChatSetTitleHandler, type ChatTitleDeps,
   createSpeakHandler, type ElevenLabsTtsDeps,
+  createPlanProposeHandler,
 } from '../tools';
 
 export interface ToolTreeResult {
@@ -217,6 +221,36 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         });
     })
 
+    // ── Plan transition ────────────────────────────
+    .branch('plan', 'Transition between planning and acting', (p) => {
+      p.leaf('propose', {
+        description: 'Propose a plan to the user and transition from plan to act mode. If accepted, the mode transitions to act mode automatically.',
+        requiredArgs: {
+          plan: { type: 'string', description: 'The proposed plan to show the user' },
+        },
+        handler: createPlanProposeHandler(deps.ask, deps.agent),
+      });
+    })
+
+
+    // ── System ─────────────────────────────────────────────────────
+    .branch('system', 'System-level operations', (sys) => {
+      
+      sys.leaf('observe', {
+        description: 'Wait for and return new events from the target chat session. Used by subconscious background agents to monitor the conversation.',
+        handler: async (kwargs) => {
+          if (!deps.agent) return '[ERROR] Agent deps not available';
+          return await createSystemObserveHandler(deps.agent)(kwargs);
+        }
+      });
+      sys.leaf('reload', {
+        description: 'Reload the agent tool tree. Call this after creating or modifying a custom tool in .obotovs/tools/ to instantly gain access to it without restarting.',
+        handler: async (kwargs) => {
+          if (!deps.agent) return '[ERROR] Agent deps not available';
+          return await createSystemReloadHandler(deps.agent)();
+        }
+      });
+    })
     // ── User interaction (ask, secrets) ────────────────────────────
     .branch('user', 'Ask the user questions or request secrets', (u) => {
       u
@@ -816,6 +850,26 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       handler: createMemoryForgetHandler(m),
     }));
     root.addChild(memBranch);
+  }
+
+
+  // ── Dynamic Custom Tools ──────────────────────────────────────────
+  const dynamicTools = loadDynamicTools();
+  if (dynamicTools.length > 0) {
+    const customBranch = new BranchNode({ name: 'custom', description: 'Workspace-specific custom tools loaded from .obotovs/tools/*.js' });
+    for (const t of dynamicTools) {
+      customBranch.addChild(new LeafNode({
+        name: t.name,
+        description: t.description,
+        requiredArgs: t.requiredArgs || {},
+        optionalArgs: t.optionalArgs || {},
+        handler: async (kwargs) => {
+          if (!deps.agent) return '[ERROR] Agent deps not available for custom tool';
+          return await t.handler(kwargs, deps.agent);
+        },
+      }));
+    }
+    root.addChild(customBranch);
   }
 
   const router = new Router(root, session, { debug: false });
