@@ -85,7 +85,11 @@
       },
       {
         "command": "obotovs.newChat",
-        "title": "Oboto: New Chat Window"
+        "title": "Oboto: New Chat Window",
+        "icon": {
+          "light": "assets/icon.png",
+          "dark": "assets/icon.png"
+        }
       },
       {
         "command": "obotovs.listChats",
@@ -149,7 +153,7 @@
     "menus": {
       "editor/title": [
         {
-          "command": "obotovs.focusChat",
+          "command": "obotovs.newChat",
           "group": "navigation"
         }
       ],
@@ -276,7 +280,19 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["ollama", "lmstudio", "openai", "anthropic", "gemini", "vertex-gemini", "vertex-anthropic", "openrouter", "deepseek", "azure-openai", "vscode-lm"],
+                "enum": [
+                  "ollama",
+                  "lmstudio",
+                  "openai",
+                  "anthropic",
+                  "gemini",
+                  "vertex-gemini",
+                  "vertex-anthropic",
+                  "openrouter",
+                  "deepseek",
+                  "azure-openai",
+                  "vscode-lm"
+                ],
                 "description": "Provider type"
               },
               "label": {
@@ -296,48 +312,80 @@
                 "description": "Default model name"
               }
             },
-            "required": ["type"]
+            "required": [
+              "type"
+            ]
           }
         },
         "obotovs.routing": {
           "type": "object",
           "default": {
-            "triage": { "providerId": "oboto" },
-            "executor": { "providerId": "oboto" }
+            "triage": {
+              "providerId": "oboto"
+            },
+            "executor": {
+              "providerId": "oboto"
+            }
           },
           "markdownDescription": "Route task roles to specific providers and models.\n\n**Roles:**\n- `triage` — quick classification (fast, cheap model)\n- `executor` — main task execution (powerful model)\n- `planner` — planning and architecture (falls back to executor if unset)\n- `summarizer` — compaction and summarization (falls back to executor if unset)\n\n**Example:**\n```json\n{\n  \"triage\": { \"providerId\": \"oboto\" },\n  \"executor\": { \"providerId\": \"my-anthropic\", \"model\": \"claude-sonnet-4-20250514\" }\n}\n```\nUse `\"oboto\"` for the managed local Ollama provider, or a key from your `providers` map.",
           "properties": {
             "triage": {
               "type": "object",
               "properties": {
-                "providerId": { "type": "string", "description": "Provider ID from providers map, or \"oboto\"" },
-                "model": { "type": "string", "description": "Model name (falls back to provider's defaultModel)" }
+                "providerId": {
+                  "type": "string",
+                  "description": "Provider ID from providers map, or \"oboto\""
+                },
+                "model": {
+                  "type": "string",
+                  "description": "Model name (falls back to provider's defaultModel)"
+                }
               },
-              "required": ["providerId"]
+              "required": [
+                "providerId"
+              ]
             },
             "executor": {
               "type": "object",
               "properties": {
-                "providerId": { "type": "string" },
-                "model": { "type": "string" }
+                "providerId": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
               },
-              "required": ["providerId"]
+              "required": [
+                "providerId"
+              ]
             },
             "planner": {
               "type": "object",
               "properties": {
-                "providerId": { "type": "string" },
-                "model": { "type": "string" }
+                "providerId": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
               },
-              "required": ["providerId"]
+              "required": [
+                "providerId"
+              ]
             },
             "summarizer": {
               "type": "object",
               "properties": {
-                "providerId": { "type": "string" },
-                "model": { "type": "string" }
+                "providerId": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
               },
-              "required": ["providerId"]
+              "required": [
+                "providerId"
+              ]
             }
           },
           "additionalProperties": false
@@ -427,7 +475,12 @@
         "obotovs.shell": {
           "type": "string",
           "default": "",
-          "enum": ["", "/bin/zsh", "/bin/bash", "/bin/sh"],
+          "enum": [
+            "",
+            "/bin/zsh",
+            "/bin/bash",
+            "/bin/sh"
+          ],
           "enumDescriptions": [
             "Auto-detect (uses $SHELL or system default)",
             "Zsh",
