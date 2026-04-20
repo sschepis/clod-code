@@ -155,6 +155,11 @@ export class SettingsPanel {
       const models = allModels[i];
 
       const envVar = ENV_KEY_MAP[config.type] || '';
+      
+      // Add defaultModel to the list if it's not there so the UI doesn't look broken
+      if (config.defaultModel && !models.includes(config.defaultModel)) {
+        models.unshift(config.defaultModel);
+      }
       result.push({
         id,
         type: config.type,

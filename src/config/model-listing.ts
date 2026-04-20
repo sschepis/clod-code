@@ -61,14 +61,27 @@ export async function getProviderModels(
   }
 
   // 3. Add unconfigured standard providers so the user knows they exist
+  
+  // Check gcloud auth first
+  const gcloudToken = await getGcloudAccessToken();
+  const gcloudProject = await getGcloudProject();
+  const hasGcloud = !!(gcloudToken && gcloudProject);
+  
   for (const [type, meta] of Object.entries(PROVIDERS)) {
     if (!configuredTypes.has(type)) {
+      if (type.startsWith('vertex-') && !hasGcloud) continue;
+      
+      let models: string[] = [];
+      if (type.startsWith('vertex-') && hasGcloud) {
+         models = await listModelsForProvider(type, '', meta.defaultBaseUrl);
+      }
+
       results.push({
         name: type,
         displayName: meta.displayName,
         isLocal: meta.isLocal,
         configured: false,
-        models: [],
+        models,
       });
     }
   }
@@ -205,7 +218,7 @@ async function listOpenAICompatModels(baseUrl: string, apiKey?: string): Promise
   try {
     const res = await fetch(url, {
       headers,
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

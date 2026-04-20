@@ -13,8 +13,6 @@ const PROVIDER_TYPES = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Google Gemini' },
-  { value: 'vertex-gemini', label: 'Vertex AI (Gemini)' },
-  { value: 'vertex-anthropic', label: 'Vertex AI (Anthropic)' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'azure-openai', label: 'Azure OpenAI' },
