@@ -135,6 +135,13 @@ async function buildProvider(
     });
   }
 
+  if (providerType === 'openclaw') {
+    const { ensureOpenClaw } = await import('../config/openclaw-manager');
+    const status = await ensureOpenClaw();
+    config.baseUrl = status.url;
+    return createProvider('openai' as ProviderName, config as any);
+  }
+
   return createProvider(providerType as ProviderName, config as any);
 }
 

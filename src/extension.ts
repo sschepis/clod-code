@@ -9,6 +9,9 @@ import { Orchestrator } from './agent/orchestrator';
 import { SessionStore } from './agent/session-store';
 import { getSettings, onSettingsChanged } from './config/settings';
 import { migrateSettingsIfNeeded, autoDetectProviders } from './config/settings-migration';
+import { AiFileTracker } from './vscode-integration/ai-file-tracker';
+import { ObotoCodeLensProvider, registerCodeLensCommands } from './vscode-integration/codelens-provider';
+import { registerQuickTask } from './vscode-integration/quick-task';
 import { logger } from './shared/logger';
 import { currentWindowId, registerWindow, unregisterWindow } from './shared/window-id';
 
@@ -41,6 +44,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let sessionStore: SessionStore | undefined;
   let orchestrator: Orchestrator | undefined;
   let chatPanelManager: ChatPanelManager | undefined;
+  let fileTracker: AiFileTracker | undefined;
 
   try {
     // 2. Create the sidebar webview provider
@@ -99,6 +103,16 @@ export async function activate(context: vscode.ExtensionContext) {
     permissionMode: settings.permissionMode,
   });
 
+  try {
+    const { ensureAlephNetNode, stopAlephNetNode } = require('./config/alephnet-manager');
+    if (settings.alephnet?.enabled) {
+      ensureAlephNetNode().catch((e: any) => logger.warn('Failed to start AlephNet node in background:', e));
+    }
+    context.subscriptions.push({ dispose: () => stopAlephNetNode() });
+  } catch (err) {
+    logger.warn('AlephNet node init failed', err);
+  }
+
   // 6. Create the orchestrator (non-blocking — uses try/catch)
   if (sidebar && sessionStore) {
     try {
@@ -117,6 +131,19 @@ export async function activate(context: vscode.ExtensionContext) {
       });
       orchestrator.setPanelRevealer((panelId) => {
         cpm.focusPanel(panelId);
+      });
+
+      // AI-modified file tracker — shows a badge on files written by the agent
+      fileTracker = new AiFileTracker();
+      context.subscriptions.push(
+        vscode.window.registerFileDecorationProvider(fileTracker),
+        fileTracker,
+      );
+      orchestrator.setFileChangedCallback((filePath) => {
+        fileTracker!.add(vscode.Uri.file(filePath));
+      });
+      orchestrator.setSessionClearedCallback(() => {
+        fileTracker!.clear();
       });
 
       // Register panel serializer for VS Code to revive panels across reloads
@@ -143,6 +170,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }).catch(err => {
         logger.error('Agent initialization failed', err);
+        vscode.commands.executeCommand('setContext', 'obotovs.agentReady', false);
       });
     } catch (err) {
       logger.error('Failed to create orchestrator', err);
@@ -151,18 +179,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
   // Register Oboto VS Explorer
+  let explorerProvider: ExplorerProvider | undefined;
   try {
-    const explorerProvider = new ExplorerProvider();
+    explorerProvider = new ExplorerProvider();
     if (orchestrator) {
       explorerProvider.setAgentProvider({
         listAll: () => orchestrator!.getAgentSummaries(),
       });
-      orchestrator.onSummariesChanged(() => explorerProvider.refresh());
+      orchestrator.onSummariesChanged(() => explorerProvider!.refresh());
     }
     const treeView = explorerProvider.createTreeView();
     context.subscriptions.push(treeView, explorerProvider);
     context.subscriptions.push(
-      vscode.commands.registerCommand('obotovs.refreshExplorer', () => explorerProvider.refresh())
+      vscode.commands.registerCommand('obotovs.refreshExplorer', () => explorerProvider!.refresh())
     );
     logger.info('Explorer Provider registered');
   } catch (err) {
@@ -171,10 +200,35 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // 8. Register commands — ALWAYS run this, even if orchestrator is missing
   try {
-    registerCommands(context, orchestrator, sidebar, chatPanelManager);
+    registerCommands(context, orchestrator, sidebar, chatPanelManager, explorerProvider);
     logger.info('Commands registered');
   } catch (err) {
     logger.error('Failed to register commands', err);
+  }
+
+  // 8b. CodeLens provider — "Ask Oboto" / "Explain" above functions and classes
+  try {
+    const codeLensProvider = new ObotoCodeLensProvider();
+    context.subscriptions.push(
+      vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider),
+      codeLensProvider,
+    );
+    registerCodeLensCommands(context, (text) => {
+      if (orchestrator) {
+        vscode.commands.executeCommand('obotovs.chatPanel.focus');
+        orchestrator.submitToAgent('foreground', text);
+      }
+    });
+    logger.info('CodeLens provider registered');
+  } catch (err) {
+    logger.error('Failed to register CodeLens provider', err);
+  }
+
+  // 8c. Quick task picker
+  try {
+    registerQuickTask(context, orchestrator);
+  } catch (err) {
+    logger.error('Failed to register quick task', err);
   }
 
   // 9. Watch for settings changes (debounced to coalesce multi-field saves)
@@ -197,6 +251,16 @@ export async function activate(context: vscode.ExtensionContext) {
             await orchestrator?.recreateAgent(newSettings);
           } catch (err) {
             logger.error('Failed to recreate agent after settings change', err);
+          }
+          try {
+            const { ensureAlephNetNode, stopAlephNetNode } = require('./config/alephnet-manager');
+            if (newSettings.alephnet?.enabled) {
+              ensureAlephNetNode().catch((e: any) => logger.warn('Failed to start AlephNet node', e));
+            } else {
+              stopAlephNetNode();
+            }
+          } catch (err) {
+            logger.error('Failed to handle AlephNet settings change', err);
           }
         }, 500);
       })

@@ -27,7 +27,7 @@ export function createOpenFilesHandler() {
     const editors = vscode.window.visibleTextEditors;
     const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
 
-    if (editors.length === 0) return '[INFO] No files currently open.';
+    if (editors.length === 0) return '[INFO] No files currently open in the editor. Use file/read to open a file, or search/glob to find files in the workspace.';
 
     const lines = editors.map(e => {
       const rel = rootPath ? e.document.uri.fsPath.replace(rootPath + '/', '') : e.document.uri.fsPath;

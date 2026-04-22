@@ -21,7 +21,7 @@ export interface AskDeps {
 export function createAskHandler(deps: AskDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const question = String(kwargs.question || '').trim();
-    if (!question) return '[ERROR] Missing required argument: question';
+    if (!question) return '[ERROR] Missing required argument: question. Provide the question to show the user, along with a choices array of at least 2 options (e.g. question="Which approach?", choices=["Refactor first","Fix inline"]).';
 
     const rawChoices = kwargs.choices;
     let choices: string[] = [];
@@ -32,11 +32,11 @@ export function createAskHandler(deps: AskDeps) {
         const parsed = JSON.parse(rawChoices);
         if (Array.isArray(parsed)) choices = parsed.map((c) => String(c));
       } catch {
-        return '[ERROR] Argument "choices" must be a JSON array of strings';
+        return '[ERROR] Argument "choices" must be a JSON array of strings (e.g. ["Option A","Option B","Option C"]). Provide at least 2 choices.';
       }
     }
     if (choices.length < 2) {
-      return '[ERROR] Argument "choices" must contain at least 2 options';
+      return '[ERROR] Argument "choices" must contain at least 2 options. For yes/no questions use choices=["Yes","No"]. For open-ended input, use user/secret instead.';
     }
 
     const defaultChoice =

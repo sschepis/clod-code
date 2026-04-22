@@ -17,7 +17,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   info: <Info size={14} className="text-blue-400" />,
   dollar: <DollarSign size={14} className="text-emerald-400" />,
   compress: <Package size={14} className="text-purple-400" />,
-  help: <HelpCircle size={14} className="text-zinc-400" />,
+  help: <HelpCircle size={14} className="text-vscode-desc" />,
   git: <GitBranch size={14} className="text-orange-400" />,
   warning: <AlertTriangle size={14} className="text-yellow-400" />,
   search: <Search size={14} className="text-blue-400" />,
@@ -34,23 +34,23 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({ commands, fi
   if (filtered.length === 0) return null;
 
   return (
-    <div className="absolute bottom-full left-4 mb-2 w-72 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-30">
-      <div className="px-3 py-2 text-xs font-semibold text-zinc-500 bg-zinc-950 border-b border-zinc-800">
+    <div className="absolute bottom-full left-4 mb-2 w-72 bg-vscode-widgetBg border border-vscode-widgetBorder rounded-lg shadow-xl overflow-hidden z-30">
+      <div className="px-3 py-2 text-xs font-semibold text-vscode-desc bg-vscode-editorBg border-b border-vscode-panelBorder">
         Commands
       </div>
       <ul className="py-1 max-h-[240px] overflow-y-auto">
         {filtered.map(cmd => (
           <li
             key={cmd.name}
-            className="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-sm text-zinc-300"
+            className="px-3 py-2 hover:bg-vscode-inputBg cursor-pointer flex items-center gap-2 text-sm text-vscode-editorFg"
             onClick={() => onSelect(cmd.name)}
           >
-            {ICON_MAP[cmd.icon || ''] || <Terminal size={14} className="text-zinc-500" />}
-            <span className="font-mono text-zinc-400">/{cmd.name}</span>
+            {ICON_MAP[cmd.icon || ''] || <Terminal size={14} className="text-vscode-desc" />}
+            <span className="font-mono text-vscode-desc">/{cmd.name}</span>
             {cmd.argumentHint && (
-              <span className="text-zinc-600 text-xs">{cmd.argumentHint}</span>
+              <span className="text-vscode-disabled text-xs">{cmd.argumentHint}</span>
             )}
-            <span className="text-zinc-500 text-xs ml-auto">{cmd.summary}</span>
+            <span className="text-vscode-desc text-xs ml-auto">{cmd.summary}</span>
           </li>
         ))}
       </ul>

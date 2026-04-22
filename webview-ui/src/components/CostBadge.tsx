@@ -21,9 +21,9 @@ export const CostBadge: React.FC<CostBadgeProps> = ({ cost }) => {
   if (cost.totalTokens === 0) return null;
 
   return (
-    <span className="flex items-center gap-1.5 text-zinc-500">
+    <span className="flex items-center gap-1.5 text-vscode-desc">
       <span>{formatCost(cost.totalCost)}</span>
-      <span className="text-zinc-700">|</span>
+      <span className="text-vscode-disabled">|</span>
       <span>{formatTokens(cost.totalTokens)} tokens</span>
     </span>
   );

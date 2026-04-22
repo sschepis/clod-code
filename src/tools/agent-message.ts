@@ -27,7 +27,7 @@ export function createAgentMessageHandler(deps: AgentToolDeps) {
       id: `user-${Date.now()}`,
       role: 'user',
       content: message,
-      timestamp: Date.now()
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
 
     // Submit the message to the agent host

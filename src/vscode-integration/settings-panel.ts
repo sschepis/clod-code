@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createProvider, type ProviderName } from '@sschepis/llm-wrapper';
+import type { BaseProvider } from '@sschepis/llm-wrapper';
 import { EXTENSION_ID } from '../shared/constants';
 import type {
   SettingsExtToWebview, SettingsWebviewToExt,
@@ -12,13 +13,29 @@ import { ENV_KEY_MAP } from '../shared/constants';
 import { getSettings } from '../config/settings';
 import { logger } from '../shared/logger';
 import { getErrorMessage } from '../shared/errors';
+import { VSCodeLMProvider } from '../config/vscode-lm-provider';
+import { TEST_CONNECTION_MESSAGE } from '../prompts';
 
 export class SettingsPanel {
   public static readonly viewType = 'obotovs.settingsPanel';
   private static currentPanel: SettingsPanel | undefined;
+  private static testResultCache = new Map<string, { success: boolean; message: string }>();
+  private static extensionContext: vscode.ExtensionContext;
+
+  private static readonly CACHE_STORAGE_KEY = 'providerTestResultCache';
 
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+
+  public static initialize(context: vscode.ExtensionContext): void {
+    SettingsPanel.extensionContext = context;
+    const stored = context.globalState.get<Record<string, { success: boolean; message: string }>>(SettingsPanel.CACHE_STORAGE_KEY);
+    if (stored) {
+      for (const [key, value] of Object.entries(stored)) {
+        SettingsPanel.testResultCache.set(key, value);
+      }
+    }
+  }
 
   public static createOrShow(extensionUri: vscode.Uri): void {
     const column = vscode.window.activeTextEditor?.viewColumn;
@@ -69,7 +86,7 @@ export class SettingsPanel {
         break;
 
       case 'test_connection':
-        await this.testConnection(msg.providerId, msg.model);
+        await this.testConnection(msg.providerId, msg.model, msg.config);
         break;
 
       case 'pull_model':
@@ -131,6 +148,7 @@ export class SettingsPanel {
       models: Array.from(new Set([...managedStatus.availableModels, ...RECOMMENDED_MANAGED_MODELS])),
       availableModels: managedStatus.availableModels,
       serviceRunning: managedStatus.ollamaRunning,
+      lastTestResult: SettingsPanel.testResultCache.get(MANAGED_PROVIDER_ID),
     });
 
     // 2. User-configured providers (fetch models from each API in parallel)
@@ -170,6 +188,7 @@ export class SettingsPanel {
         envKeySet: !!(envVar && process.env[envVar]),
         managed: false,
         models,
+        lastTestResult: SettingsPanel.testResultCache.get(id),
       });
     }
 
@@ -179,6 +198,20 @@ export class SettingsPanel {
   private async saveSettings(updates: Partial<SettingsState>): Promise<void> {
     const redactedKeys = new Set(['providers']);
     logger.info('Save requested', { keys: Object.keys(updates) });
+
+    if (updates.providers) {
+      await this.trackDismissedProviders(updates.providers);
+      // Prune test results for removed providers
+      const activeIds = new Set([MANAGED_PROVIDER_ID, ...Object.keys(updates.providers)]);
+      let pruned = false;
+      for (const cachedId of SettingsPanel.testResultCache.keys()) {
+        if (!activeIds.has(cachedId)) {
+          SettingsPanel.testResultCache.delete(cachedId);
+          pruned = true;
+        }
+      }
+      if (pruned) SettingsPanel.persistCache();
+    }
 
     const saved: Partial<SettingsState> = {};
     const errors: string[] = [];
@@ -224,7 +257,42 @@ export class SettingsPanel {
     }
   }
 
-  private async testConnection(providerId: string, modelName: string): Promise<void> {
+  private async trackDismissedProviders(
+    newProviders: Record<string, import('../shared/message-types').SettingsProviderConfig>,
+  ): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
+    const oldProviders = cfg.get<Record<string, { type: string }>>('providers', {});
+    const oldTypes = new Set(Object.values(oldProviders).map(p => p.type));
+    const newTypes = new Set(Object.values(newProviders).map(p => p.type));
+
+    const dismissed = new Set(cfg.get<string[]>('dismissedProviders', []));
+    let changed = false;
+
+    for (const t of oldTypes) {
+      if (t && !newTypes.has(t)) {
+        dismissed.add(t);
+        changed = true;
+      }
+    }
+
+    for (const t of newTypes) {
+      if (dismissed.has(t)) {
+        dismissed.delete(t);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await cfg.update('dismissedProviders', [...dismissed], vscode.ConfigurationTarget.Global);
+      logger.info('Dismissed providers updated', { dismissed: [...dismissed] });
+    }
+  }
+
+  private async testConnection(
+    providerId: string,
+    modelName: string,
+    uiConfig?: import('../shared/message-types').SettingsProviderConfig,
+  ): Promise<void> {
     try {
       if (providerId === MANAGED_PROVIDER_ID) {
         await this.testManagedProvider(modelName);
@@ -232,7 +300,7 @@ export class SettingsPanel {
       }
 
       const settings = getSettings();
-      const providerConfig = settings.providers[providerId];
+      const providerConfig = uiConfig ?? settings.providers[providerId];
       if (!providerConfig) {
         throw new Error(`Provider "${providerId}" not found in settings.`);
       }
@@ -273,22 +341,41 @@ export class SettingsPanel {
           throw new Error('No model available. Ensure you are logged into Google Cloud via \'gcloud auth login\' and \'gcloud config set project <your-project>\'.');
         } else if (providerConfig.type === 'vscode-lm') {
           throw new Error('No model available. Ensure you have a GitHub Copilot or other VS Code language model extension installed.');
+        } else if (providerConfig.type === 'azure-openai') {
+          throw new Error('No model available. Azure OpenAI requires both an API key and an endpoint URL. Enter your Azure resource endpoint (e.g. https://your-resource.openai.azure.com), save, then reopen settings.');
         } else {
           throw new Error('No model available. Save your API key first, then reopen settings to load the model list.');
         }
       }
 
-      const config: Record<string, unknown> = { apiKey: apiKey || 'local' };
       const baseUrl = normalizeBaseUrl(providerConfig.type, providerConfig.baseUrl || meta.defaultBaseUrl);
-      if (baseUrl) config.baseUrl = baseUrl;
 
-      const provider = await createProvider(providerConfig.type as ProviderName, config as any);
+      let provider: BaseProvider;
+      if (providerConfig.type === 'vscode-lm') {
+        provider = new VSCodeLMProvider({ apiKey: 'vscode-lm' });
+      } else if (providerConfig.type === 'azure-openai') {
+        if (!baseUrl) {
+          throw new Error('Azure OpenAI requires an endpoint URL. Enter your Azure resource endpoint (e.g. https://your-resource.openai.azure.com) and save.');
+        }
+        const baseProvider = await createProvider('openai' as ProviderName, { apiKey: apiKey || 'azure' } as any);
+        const { AzureOpenAI } = await import('openai');
+        (baseProvider as any).client = new AzureOpenAI({
+          apiKey,
+          endpoint: baseUrl,
+          deployment: model,
+          apiVersion: '2024-10-21',
+        });
+        provider = baseProvider;
+      } else {
+        const config: Record<string, unknown> = { apiKey: apiKey || 'local' };
+        if (baseUrl) config.baseUrl = baseUrl;
+        provider = await createProvider(providerConfig.type as ProviderName, config as any);
+      }
 
       const response = await withTimeout(
         provider.chat({
           model,
-          messages: [{ role: 'user', content: 'Reply with the single word "ok".' }],
-          max_tokens: 16,
+          messages: [{ role: 'user', content: TEST_CONNECTION_MESSAGE }],
         }),
         30_000,
         `Timed out after 30 seconds — the provider may be slow or unreachable.`,
@@ -347,8 +434,7 @@ export class SettingsPanel {
       const response = await withTimeout(
         provider.chat({
           model: modelName,
-          messages: [{ role: 'user', content: 'Reply with the single word "ok".' }],
-          max_tokens: 16,
+          messages: [{ role: 'user', content: TEST_CONNECTION_MESSAGE }],
         }),
         30_000,
         `Timed out after 30 seconds — is ${modelName} loaded?`,
@@ -407,12 +493,27 @@ export class SettingsPanel {
     for (const key of keys) {
       await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
     }
+    SettingsPanel.testResultCache.clear();
+    SettingsPanel.persistCache();
     logger.info('Settings reset to defaults');
     this.sync();
   }
 
   private post(msg: SettingsExtToWebview): void {
+    if (msg.type === 'connection_test') {
+      SettingsPanel.testResultCache.set(msg.providerId, { success: msg.success, message: msg.message });
+      SettingsPanel.persistCache();
+    }
     this.panel.webview.postMessage(msg);
+  }
+
+  private static persistCache(): void {
+    if (!SettingsPanel.extensionContext) return;
+    const obj: Record<string, { success: boolean; message: string }> = {};
+    for (const [key, value] of SettingsPanel.testResultCache) {
+      obj[key] = value;
+    }
+    SettingsPanel.extensionContext.globalState.update(SettingsPanel.CACHE_STORAGE_KEY, obj);
   }
 
   public dispose(): void {

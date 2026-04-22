@@ -8,8 +8,9 @@ import { PermissionPrompt } from './PermissionPrompt';
 import { QuestionPrompt } from './QuestionPrompt';
 import { SecretPrompt } from './SecretPrompt';
 import { PeerDispatchPrompt } from './PeerDispatchPrompt';
+import { PlanApprovalPrompt } from './PlanApprovalPrompt';
 import { PhaseIndicator } from './PhaseIndicator';
-import type { SessionEvent, PhaseState } from '../../../src/shared/message-types';
+import type { SessionEvent, PhaseState, PlanApprovalMode } from '../../../src/shared/message-types';
 
 interface ChatPanelProps {
   events: SessionEvent[];
@@ -22,10 +23,11 @@ interface ChatPanelProps {
   onQuestionRespond: (promptId: string, response: { cancelled?: boolean; answerIndex?: number; answerText?: string }) => void;
   onSecretRespond: (promptId: string, response: { cancelled?: boolean; value?: string; saveToFile?: boolean }) => void;
   onPeerDispatchRespond: (promptId: string, approved: boolean) => void;
+  onPlanApprovalRespond: (promptId: string, response: { denied?: boolean; approvalMode?: PlanApprovalMode }) => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
-  events, phase, isProcessing, onRevert, onEdit, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond,
+  events, phase, isProcessing, onRevert, onEdit, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond, onPlanApprovalRespond,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -87,10 +89,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         );
       case 'narrative':
-        return null;
+        return (
+          <div key={event.id || index} className="px-6 py-1.5 flex items-center gap-2 text-xs text-vscode-desc border-l-2 border-sky-500/30 my-1 fade-in font-mono">
+            <span className="text-sky-400/60 shrink-0">&#x25B8;</span>
+            <span className="break-words min-w-0">{event.content}</span>
+            <span className="text-vscode-disabled ml-auto shrink-0 tabular-nums">
+              {event.totalToolCalls} calls
+            </span>
+          </div>
+        );
       case 'system':
         return (
-          <div key={event.id || index} className="px-6 py-3 text-xs text-zinc-500 italic border-b border-zinc-800/30 fade-in">
+          <div key={event.id || index} className="px-6 py-3 text-xs text-vscode-desc italic border-b border-vscode-panelBorder/30 fade-in">
             {event.content}
           </div>
         );
@@ -145,6 +155,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             onRespond={onPeerDispatchRespond}
           />
         );
+      case 'plan_approval':
+        return (
+          <PlanApprovalPrompt
+            key={event.id || index}
+            promptId={event.promptId}
+            planSummary={event.planSummary}
+            planFilePath={event.planFilePath}
+            status={event.status}
+            approvalMode={event.approvalMode}
+            onRespond={onPlanApprovalRespond}
+          />
+        );
       default:
         return null;
     }
@@ -153,15 +175,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   return (
     <div
       ref={scrollRef}
+      role="log"
+      aria-live="polite"
+      aria-label="Chat messages"
       className="flex-1 overflow-y-auto scroll-smooth pb-6 relative"
       style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
     >
       {events.length === 0 && !isProcessing ? (
-        <div className="flex h-full items-center justify-center text-zinc-600 space-y-4 flex-col">
+        <div className="flex h-full items-center justify-center text-vscode-disabled space-y-4 flex-col">
           <div className="text-center space-y-3">
             <div className="text-3xl">&#x2726;</div>
-            <p className="text-sm font-medium text-zinc-400">Oboto</p>
-            <p className="text-xs text-zinc-600 max-w-[280px]">
+            <p className="text-sm font-medium text-vscode-desc">Oboto</p>
+            <p className="text-xs text-vscode-disabled max-w-[280px]">
               Multi-LLM AI coding assistant. Type a message, paste code, or use /commands to get started.
             </p>
           </div>
@@ -175,7 +200,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           )}
 
           {isProcessing && phase.phase === 'idle' && (
-            <div className="px-6 py-4 ml-4 flex items-center gap-3 text-zinc-500 text-sm italic">
+            <div className="px-6 py-4 ml-4 flex items-center gap-3 text-vscode-desc text-sm italic">
               <Loader2 size={14} className="animate-spin" />
               Agent is working...
             </div>

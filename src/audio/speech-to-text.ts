@@ -56,6 +56,7 @@ export class SpeechToText {
 
   private recorderBin: string | null = null;
   private whisperBin: string | null = null;
+  private whisperVariant: 'cpp' | 'python' = 'cpp';
   private modelPath: string | null = null;
 
   constructor(storageDir: string) {
@@ -77,34 +78,55 @@ export class SpeechToText {
       }
     }
 
-    this.whisperBin = which('whisper-cli') ?? which('whisper') ?? which('main');
-    if (!this.whisperBin) {
+    const whisperCli = which('whisper-cli') ?? which('main');
+    const whisperPy = which('whisper');
+
+    if (whisperCli) {
+      this.whisperBin = whisperCli;
+      this.whisperVariant = 'cpp';
+    } else if (whisperPy) {
+      const isPython = this.detectPythonWhisper(whisperPy);
+      this.whisperBin = whisperPy;
+      this.whisperVariant = isPython ? 'python' : 'cpp';
+    } else {
       const localBin = path.join(this.storageDir, 'whisper-cli');
       if (fs.existsSync(localBin)) {
         this.whisperBin = localBin;
+        this.whisperVariant = 'cpp';
       }
     }
 
     if (!this.whisperBin) {
-      return { available: false, reason: 'Whisper not found. Install whisper.cpp and ensure `whisper-cli` is on PATH, or place the binary in the extension storage.' };
+      return { available: false, reason: 'Whisper not found. Install whisper.cpp (`whisper-cli` on PATH), OpenAI whisper (`pip install openai-whisper`), or place the whisper-cli binary in the extension storage.' };
     }
 
-    fs.mkdirSync(this.storageDir, { recursive: true });
-    this.modelPath = path.join(this.storageDir, WHISPER_MODEL_FILE);
-    if (!fs.existsSync(this.modelPath)) {
-      logger.info('[speech] Downloading whisper model...');
-      this.callbacks?.onStatusChange('transcribing', 'Downloading whisper model (first-time setup)...');
-      try {
-        await downloadFile(WHISPER_MODEL_URL, this.modelPath);
-        logger.info('[speech] Model downloaded');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error('[speech] Model download failed', err);
-        return { available: false, reason: `Failed to download whisper model: ${msg}` };
+    if (this.whisperVariant === 'cpp') {
+      fs.mkdirSync(this.storageDir, { recursive: true });
+      this.modelPath = path.join(this.storageDir, WHISPER_MODEL_FILE);
+      if (!fs.existsSync(this.modelPath)) {
+        logger.info('[speech] Downloading whisper model...');
+        this.callbacks?.onStatusChange('transcribing', 'Downloading whisper model (first-time setup)...');
+        try {
+          await downloadFile(WHISPER_MODEL_URL, this.modelPath);
+          logger.info('[speech] Model downloaded');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error('[speech] Model download failed', err);
+          return { available: false, reason: `Failed to download whisper model: ${msg}` };
+        }
       }
     }
 
     return { available: true };
+  }
+
+  private detectPythonWhisper(bin: string): boolean {
+    try {
+      const help = execSync(`${bin} --help 2>&1`, { encoding: 'utf8', timeout: 5000 });
+      return help.includes('--output_format') || help.includes('openai-whisper');
+    } catch {
+      return false;
+    }
   }
 
   isRecording(): boolean {
@@ -204,15 +226,28 @@ export class SpeechToText {
 
   private transcribe(audioFile: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const args = [
-        '-m', this.modelPath!,
-        '-f', audioFile,
-        '--no-timestamps',
-        '-l', 'en',
-        '--output-txt',
-      ];
+      let args: string[];
 
-      logger.info(`[speech] Transcribing: ${this.whisperBin} ${args.join(' ')}`);
+      if (this.whisperVariant === 'python') {
+        const outDir = path.dirname(audioFile);
+        args = [
+          audioFile,
+          '--model', 'base.en',
+          '--language', 'en',
+          '--output_format', 'txt',
+          '--output_dir', outDir,
+        ];
+      } else {
+        args = [
+          '-m', this.modelPath!,
+          '-f', audioFile,
+          '--no-timestamps',
+          '-l', 'en',
+          '--output-txt',
+        ];
+      }
+
+      logger.info(`[speech] Transcribing (${this.whisperVariant}): ${this.whisperBin} ${args.join(' ')}`);
 
       const proc = spawn(this.whisperBin!, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -229,7 +264,10 @@ export class SpeechToText {
           reject(new Error(`whisper exited ${code}: ${stderr.join('')}`));
           return;
         }
-        const txtFile = audioFile + '.txt';
+        const baseName = audioFile.replace(/\.wav$/, '');
+        const txtFile = this.whisperVariant === 'python'
+          ? baseName + '.txt'
+          : audioFile + '.txt';
         if (fs.existsSync(txtFile)) {
           const text = fs.readFileSync(txtFile, 'utf8');
           try { fs.unlinkSync(txtFile); } catch { /* best-effort */ }

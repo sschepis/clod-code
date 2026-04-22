@@ -16,6 +16,7 @@ export interface SurfaceError {
   source?: string;
   lineno?: number;
   colno?: number;
+  consoleLogs?: string[];
 }
 
 export interface SurfacePanelOptions {
@@ -86,6 +87,7 @@ export class SurfacePanel {
           source: typeof m.source === 'string' ? m.source : undefined,
           lineno: typeof m.lineno === 'number' ? m.lineno : undefined,
           colno: typeof m.colno === 'number' ? m.colno : undefined,
+          consoleLogs: Array.isArray(m.consoleLogs) ? (m.consoleLogs as string[]).slice(0, 20) : undefined,
         });
       }
       
@@ -131,6 +133,39 @@ export class SurfacePanel {
 
   reveal(): void {
     if (!this.disposed) this.panel.reveal(vscode.ViewColumn.Active, false);
+  }
+
+  /**
+   * Capture the surface's rendered output as a PNG buffer.
+   * Sends a message to the webview which uses html2canvas to render the DOM,
+   * then returns the result as base64-encoded PNG data.
+   */
+  capture(timeoutMs = 15000): Promise<Buffer> {
+    if (this.disposed) return Promise.reject(new Error('Surface panel is disposed'));
+    return new Promise<Buffer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        sub.dispose();
+        reject(new Error('Screenshot capture timed out'));
+      }, timeoutMs);
+
+      const sub = this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+        if (!msg || typeof msg !== 'object') return;
+        const m = msg as Record<string, unknown>;
+        if (m.type === 'obotovs:capture-result') {
+          clearTimeout(timer);
+          sub.dispose();
+          if (typeof m.error === 'string') {
+            reject(new Error(m.error));
+          } else if (typeof m.data === 'string') {
+            resolve(Buffer.from(m.data, 'base64'));
+          } else {
+            reject(new Error('Capture returned no data'));
+          }
+        }
+      });
+
+      this.panel.webview.postMessage({ type: 'obotovs:capture' });
+    });
   }
 
   /** Called by the manager when the surface file changes on disk. */
@@ -192,9 +227,31 @@ export class SurfacePanel {
       `<script nonce="${nonce}">\n` +
       `  window.__OBOTOVS_ROUTES_URL__ = ${routesUrlJson};\n` +
       `  window.__OBOTOVS_SURFACE__ = ${JSON.stringify(this.opts.name)};\n` +
+      `  var vsc = acquireVsCodeApi();\n` +
       `  window.addEventListener('message', function(e){\n` +
       `    var d = e && e.data; if (!d) return;\n` +
       `    if (d.type === 'obotovs:routes') window.__OBOTOVS_ROUTES_URL__ = d.url;\n` +
+      `    if (d.type === 'obotovs:capture') {\n` +
+      `      (function() {\n` +
+      `        function doCapture() {\n` +
+      `          html2canvas(document.body, { useCORS: true, logging: false, scale: 1 }).then(function(canvas) {\n` +
+      `            var dataUrl = canvas.toDataURL('image/png');\n` +
+      `            var base64 = dataUrl.replace(/^data:image\\/png;base64,/, '');\n` +
+      `            vsc.postMessage({ type: 'obotovs:capture-result', data: base64 });\n` +
+      `          }).catch(function(err) {\n` +
+      `            vsc.postMessage({ type: 'obotovs:capture-result', error: err.message || String(err) });\n` +
+      `          });\n` +
+      `        }\n` +
+      `        if (window.html2canvas) { doCapture(); return; }\n` +
+      `        var script = document.createElement('script');\n` +
+      `        script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';\n` +
+      `        script.onload = doCapture;\n` +
+      `        script.onerror = function() {\n` +
+      `          vsc.postMessage({ type: 'obotovs:capture-result', error: 'Failed to load html2canvas from CDN' });\n` +
+      `        };\n` +
+      `        document.head.appendChild(script);\n` +
+      `      })();\n` +
+      `    }\n` +
       `    if (d.type === 'obotovs:hmr') {\n` +
       `      var parser = new DOMParser();\n` +
       `      var doc = parser.parseFromString(d.html, 'text/html');\n` +
@@ -206,13 +263,25 @@ export class SurfacePanel {
       `    }\n` +
       `  });\n` +
       `  (function(){\n` +
-      `    var vsc = acquireVsCodeApi();\n` +
       `    var sent = {};\n` +
+      `    var consoleLogs = [];\n` +
+      `    var MAX_CONSOLE_LOGS = 20;\n` +
+      `    var origError = console.error;\n` +
+      `    console.error = function() {\n` +
+      `      var args = Array.prototype.slice.call(arguments);\n` +
+      `      var msg = args.map(function(a) {\n` +
+      `        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }\n` +
+      `        catch(e) { return String(a); }\n` +
+      `      }).join(' ');\n` +
+      `      if (consoleLogs.length >= MAX_CONSOLE_LOGS) consoleLogs.shift();\n` +
+      `      consoleLogs.push(msg);\n` +
+      `      origError.apply(console, arguments);\n` +
+      `    };\n` +
       `    function report(msg, src, line, col, stack) {\n` +
       `      var key = msg + ':' + (line||0);\n` +
       `      if (sent[key]) return;\n` +
       `      sent[key] = 1;\n` +
-      `      vsc.postMessage({ type: 'obotovs:surface-error', message: msg, source: src, lineno: line, colno: col, stack: stack });\n` +
+      `      vsc.postMessage({ type: 'obotovs:surface-error', message: msg, source: src, lineno: line, colno: col, stack: stack, consoleLogs: consoleLogs.slice() });\n` +
       `    }\n` +
       `    window.onerror = function(msg, src, line, col, err) {\n` +
       `      report(String(msg), src, line, col, err && err.stack ? err.stack : undefined);\n` +

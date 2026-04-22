@@ -60,7 +60,7 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
 
           if (isInline) {
             return (
-              <code className="bg-zinc-800/60 px-1.5 py-0.5 rounded text-[0.9em] text-zinc-300" {...props}>
+              <code className="bg-vscode-inputBg/60 px-1.5 py-0.5 rounded text-[0.9em] text-vscode-editorFg" {...props}>
                 {children}
               </code>
             );
@@ -87,10 +87,10 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
           );
         },
         th({ children }) {
-          return <th className="border border-zinc-700 px-2 py-1 bg-zinc-800/60 text-left font-medium">{children}</th>;
+          return <th className="border border-vscode-widgetBorder px-2 py-1 bg-vscode-inputBg/60 text-left font-medium">{children}</th>;
         },
         td({ children }) {
-          return <td className="border border-zinc-800 px-2 py-1">{children}</td>;
+          return <td className="border border-vscode-panelBorder px-2 py-1">{children}</td>;
         },
       }}
     >

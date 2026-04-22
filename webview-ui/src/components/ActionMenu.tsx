@@ -29,10 +29,10 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdi
   };
 
   return (
-    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-zinc-800/90 border border-zinc-700 backdrop-blur-sm rounded-md p-1 shadow-lg z-10">
+    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-vscode-inputBg/90 border border-vscode-widgetBorder backdrop-blur-sm rounded-md p-1 shadow-lg z-10">
       <button
         onClick={handleCopy}
-        className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700 rounded transition-colors"
+        className="p-1.5 text-vscode-desc hover:text-vscode-editorFg hover:bg-vscode-hoverBg rounded transition-colors"
         title="Copy text"
       >
         {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -40,7 +40,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdi
       {role === 'user' && onEdit && (
         <button
           onClick={() => onEdit(id, content)}
-          className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-zinc-700 rounded transition-colors"
+          className="p-1.5 text-vscode-desc hover:text-blue-400 hover:bg-vscode-hoverBg rounded transition-colors"
           title="Edit & resubmit"
         >
           <Pencil size={14} />
@@ -49,7 +49,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdi
       {onDelete && (
         <button
           onClick={() => onDelete(id)}
-          className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-zinc-700 rounded transition-colors"
+          className="p-1.5 text-vscode-desc hover:text-red-400 hover:bg-vscode-hoverBg rounded transition-colors"
           title="Delete message"
         >
           <Trash2 size={14} />
@@ -57,7 +57,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdi
       )}
       <button
         onClick={() => onRevert(id)}
-        className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-zinc-700 rounded transition-colors"
+        className="p-1.5 text-vscode-desc hover:text-amber-400 hover:bg-vscode-hoverBg rounded transition-colors"
         title="Revert to here"
       >
         <RotateCcw size={14} />

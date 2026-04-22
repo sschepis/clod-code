@@ -13,8 +13,11 @@ class Logger {
   private channel?: vscode.OutputChannel;
   private minLevel: LogLevel = 'info';
 
-  /** Initialize with a VS Code OutputChannel. Call once during activation. */
+  /** Initialize with a VS Code OutputChannel. Disposes any previous channel on re-activation. */
   init(channel: vscode.OutputChannel): void {
+    if (this.channel) {
+      try { this.channel.dispose(); } catch { /* already disposed */ }
+    }
     this.channel = channel;
   }
 

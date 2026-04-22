@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
-export function createFileWriteHandler() {
+export function createFileWriteHandler(onFileChanged?: (filePath: string) => void) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const filePath = String(kwargs.path || '');
     const content = String(kwargs.content ?? '');
-    if (!filePath) return '[ERROR] Missing required argument: path';
+    if (!filePath) return '[ERROR] Missing required argument: path. Provide an absolute path or workspace-relative path (e.g. "src/utils/helper.ts"). Parent directories are created automatically.';
 
     try {
       const uri = vscode.Uri.file(filePath);
@@ -13,11 +13,16 @@ export function createFileWriteHandler() {
       // Check if file exists and read for diff
       let oldContent = '';
       let isNew = false;
-      try {
-        const existing = await vscode.workspace.fs.readFile(uri);
-        oldContent = new TextDecoder().decode(existing);
-      } catch {
-        isNew = true;
+      const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
+      if (doc) {
+        oldContent = doc.getText();
+      } else {
+        try {
+          const existing = await vscode.workspace.fs.readFile(uri);
+          oldContent = new TextDecoder().decode(existing);
+        } catch {
+          isNew = true;
+        }
       }
 
       // Ensure parent directory exists
@@ -29,7 +34,18 @@ export function createFileWriteHandler() {
       }
 
       // Write the file
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+      if (doc) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+          doc.positionAt(0),
+          doc.positionAt(doc.getText().length),
+        );
+        edit.replace(uri, fullRange, content);
+        await vscode.workspace.applyEdit(edit);
+      } else {
+        await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+      }
+      onFileChanged?.(filePath);
 
       if (isNew) {
         return `[SUCCESS] Created new file: ${filePath} (${content.length} bytes)`;
@@ -42,7 +58,14 @@ export function createFileWriteHandler() {
 
       return `[SUCCESS] Updated file: ${filePath}\nLines: ${oldLines.length} → ${newLines.length} (${added >= 0 ? '+' : ''}${added})`;
     } catch (err) {
-      return `[ERROR] Failed to write file '${filePath}': ${err instanceof Error ? err.message : String(err)}`;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('EACCES') || msg.includes('permission')) {
+        return `[ERROR] Permission denied writing '${filePath}': ${msg}. Check file/directory permissions.`;
+      }
+      if (msg.includes('ENOSPC')) {
+        return `[ERROR] Disk full — cannot write '${filePath}'. Free disk space and retry.`;
+      }
+      return `[ERROR] Failed to write file '${filePath}': ${msg}`;
     }
   };
 }

@@ -1,22 +1,29 @@
 import { createSystemObserveHandler } from '../tools/system-observe';
 import { createSystemReloadHandler } from '../tools/system-reload';
 import { loadDynamicTools } from './dynamic-tools';
-import { TreeBuilder, SessionManager, Router, BranchNode, LeafNode } from '@sschepis/swiss-army-tool';
+import {
+  TreeBuilder, SessionManager, Router, BranchNode, LeafNode,
+  SessionNotes, createNotesMiddleware, createNotesModule,
+  createRedirectMiddleware, STANDARD_REDIRECTS,
+} from '@sschepis/swiss-army-tool';
+import type { Middleware } from '@sschepis/swiss-army-tool';
 import {
   createFileReadHandler, createFileWriteHandler, createFileEditHandler,
   createShellRunHandler, createShellBackgroundHandler,
   createGlobSearchHandler, createGrepSearchHandler,
   createGitStatusHandler, createGitDiffHandler, createGitLogHandler,
   createGitCommitHandler, createGitBranchHandler, createGitStashHandler,
+  createGitReviewHandler, createGitReviewUncommittedHandler,
   createDiagnosticsHandler,
   createWorkspaceInfoHandler, createOpenFilesHandler,
   createTerminalHandler,
+  createTerminalUiStateHandler,
   createAskHandler, createSecretHandler,
   createAgentSpawnHandler, createAgentQueryHandler, createAgentMessageHandler,
   createAgentListHandler, createAgentCancelHandler,
   createAgentBatchHandler, createAgentCollectHandler,
   createSurfaceListHandler, createSurfaceCreateHandler, createSurfaceUpdateHandler,
-  createSurfaceDeleteHandler, createSurfaceOpenHandler,
+  createSurfaceDeleteHandler, createSurfaceOpenHandler, createSurfaceScreenshotHandler,
   createRouteListHandler, createRouteInfoHandler, createRouteCreateHandler,
   createRouteUpdateHandler, createRouteDeleteHandler,
   createVscodeRunHandler, createVscodeListHandler,
@@ -35,12 +42,51 @@ import {
   type PeerToolDeps, type MemoryToolDeps, type ShellDeps,
   createChatSetTitleHandler, type ChatTitleDeps,
   createSpeakHandler, type ElevenLabsTtsDeps,
-  createPlanProposeHandler,
+  createPlanProposeHandler, type PlanProposeDeps,
+  createCodeSymbolsHandler,
+  createCodeDefinitionHandler,
+  createCodeReferencesHandler,
+  createCodeHoverHandler,
+  createCodeWorkspaceSymbolsHandler,
+  createCodeExploreHandler,
+  createCodeActionsHandler,
+  createCodeFixHandler,
+  createCodeRenameHandler,
+  createCodeFormatHandler,
+  createCodeCallHierarchyHandler,
+  createCodeTypeHierarchyHandler,
+  createCodeSignatureHandler,
+  createCodeCompletionsHandler,
+  createCodeInlayHintsHandler,
+  createCodeMapHandler,
+  type CodeMapDeps,
+  createProjectInitHandler,
+  createProjectListHandler,
+  createProjectGetHandler,
+  createProjectUpdateHandler,
+  createProjectPlanCreateHandler,
+  createProjectPlanUpdateHandler,
+  createProjectPlanListHandler,
+  createProjectTaskCreateHandler,
+  createProjectTaskUpdateHandler,
+  createProjectTaskListHandler,
+  createProjectReviewCreateHandler,
+  createProjectReviewUpdateHandler,
+  createProjectStatusHandler,
+  createProjectArchiveHandler,
+  type ProjectToolDeps,
 } from '../tools';
+import {
+  createAlephNetThinkHandler,
+  createAlephNetRememberHandler,
+  createAlephNetRecallHandler,
+  createAlephNetChatHandler,
+} from '../tools/alephnet-tools';
 
 export interface ToolTreeResult {
   router: Router;
   session: SessionManager;
+  notes: SessionNotes;
 }
 
 export interface ToolTreeDeps {
@@ -64,6 +110,14 @@ export interface ToolTreeDeps {
   shell: ShellDeps;
   /** ElevenLabs TTS — lets the agent speak aloud to the user. */
   tts?: ElevenLabsTtsDeps;
+  /** Per-agent code intelligence exploration context. */
+  codeMap?: CodeMapDeps;
+  /** Workspace-scoped project manager — project management, plans, tasks, reviews. */
+  project?: ProjectToolDeps;
+  /** Plan proposal — saves plan, opens markdown preview, shows approval prompt. */
+  planPropose?: PlanProposeDeps;
+  /** Called when the agent writes or edits a file — used for AI-modified file decorations. */
+  onFileChanged?: (filePath: string) => void;
 }
 
 /**
@@ -72,10 +126,11 @@ export interface ToolTreeDeps {
  */
 export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
   const session = new SessionManager();
+  const sessionNotes = new SessionNotes();
 
   const builder = TreeBuilder.create('root', 'Oboto VS coding assistant tool tree')
     // ── File operations ────────────────────────────────────────────
-    .branch('file', 'File operations — read, write, edit, list', (file) => {
+    .branch('file', 'Read, write, and edit files. Use file/read to inspect code (supports offset/limit for large files), file/write for new files, file/edit for surgical changes with exact-match replacement or line-anchored inserts. Prefer file/edit over file/write when modifying existing files — it is safer and supports undo.', (file) => {
       file
         .leaf('read', {
           description: 'Read a file with line numbers. Supports offset and limit for large files.',
@@ -92,7 +147,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             path: { type: 'string', description: 'File path' },
             content: { type: 'string', description: 'File content' },
           },
-          handler: createFileWriteHandler(),
+          handler: createFileWriteHandler(deps.onFileChanged),
         })
         .leaf('edit', {
           description: [
@@ -113,12 +168,12 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             after_line: { type: 'number', description: 'Insert new_string after this line number (1-based). Use 0 to insert at file start. (mode 3)' },
             before_line: { type: 'number', description: 'Insert new_string before this line number (1-based). (mode 3)' },
           },
-          handler: createFileEditHandler(),
+          handler: createFileEditHandler(deps.onFileChanged),
         });
     })
 
     // ── Search operations ──────────────────────────────────────────
-    .branch('search', 'Search for files and code content', (search) => {
+    .branch('search', 'Find files and search code content. Use search/glob to find files by name pattern (e.g. "**/*.ts"), search/grep to search inside files by regex. For semantic code search (definitions, references, types), use the code module instead.', (search) => {
       search
         .leaf('glob', {
           description: 'Find files by glob pattern (e.g., "**/*.ts", "src/**/*.test.*")',
@@ -144,8 +199,179 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         });
     })
 
+    // ── Code intelligence (VS Code language server) ─────────────
+    .branch('code', 'Semantic code intelligence via VS Code language servers. ALWAYS use code/explore as your FIRST tool when investigating any code area. It returns symbols, type info, definitions, and call hierarchy in a single call.', (code) => {
+      code
+        .leaf('explore', {
+          description: 'Deep-explore a file or symbol in ONE call. Returns: symbol outline, type info for exports, and (if symbol given) definition with context + call hierarchy. Use this FIRST before any file/read, search/grep, or other code/* calls. Replaces 10-20 sequential reads/greps.',
+          requiredArgs: { path: { type: 'string', description: 'File path to explore' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Specific symbol to deep-dive on (gets definition, type info, call hierarchy)' },
+            depth: { type: 'number', description: 'Exploration depth: 1 (symbols+hover), 2 (adds call hierarchy), 3 (adds references)', default: 2 },
+          },
+          handler: createCodeExploreHandler(deps.codeMap),
+        })
+        .leaf('symbols', {
+          description: 'Get a file\'s symbol outline (functions, classes, interfaces, variables). Use instead of grep to understand file structure.',
+          requiredArgs: { path: { type: 'string', description: 'File path (absolute or workspace-relative)' } },
+          optionalArgs: {
+            flat: { type: 'boolean', description: 'Flatten nested symbols into a flat list', default: false },
+          },
+          handler: createCodeSymbolsHandler(deps.codeMap),
+        })
+        .leaf('definition', {
+          description: 'Go to definition of a symbol. Returns the definition location with surrounding code context. Accepts symbol name or line/column position.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol reference' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name to find (preferred — scans file for this name)' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeDefinitionHandler(deps.codeMap),
+        })
+        .leaf('references', {
+          description: 'Find all references to a symbol across the workspace. Shows each call site with the line of code.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name to find references for' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            max_results: { type: 'number', description: 'Max references to return', default: 30 },
+          },
+          handler: createCodeReferencesHandler(deps.codeMap),
+        })
+        .leaf('hover', {
+          description: 'Get type information and documentation for a symbol. Shows the full type signature without reading the source.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeHoverHandler(deps.codeMap),
+        })
+        .leaf('workspace-symbols', {
+          description: 'Search for symbols by name across the entire workspace. Finds functions, classes, interfaces, etc. without knowing which file they are in.',
+          requiredArgs: { query: { type: 'string', description: 'Symbol name or partial name to search for' } },
+          optionalArgs: {
+            max_results: { type: 'number', description: 'Max results', default: 30 },
+          },
+          handler: createCodeWorkspaceSymbolsHandler(deps.codeMap),
+        })
+        .leaf('map', {
+          description: 'View your accumulated exploration context. Shows files explored, symbols discovered, and relationships found. Use scope="frontier" to see referenced-but-unexplored files.',
+          optionalArgs: {
+            scope: { type: 'string', description: 'Query scope: summary (default), file, symbol, relations, frontier' },
+            query: { type: 'string', description: 'File path or symbol name to query (required for file/symbol/relations scopes)' },
+          },
+          handler: deps.codeMap
+            ? createCodeMapHandler(deps.codeMap)
+            : async () => '[INFO] Code map is not available in this context.',
+        })
+        .leaf('actions', {
+          description: 'List available code actions / quick fixes at a position or range (auto-import, extract method, fix errors). Use code/fix to apply one.',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          optionalArgs: {
+            line: { type: 'number', description: 'Line number (1-based). Omit to scan whole file.' },
+            end_line: { type: 'number', description: 'End line for range' },
+            kind: { type: 'string', description: 'Filter by CodeActionKind (e.g., "quickfix", "refactor.extract")' },
+          },
+          handler: createCodeActionsHandler(),
+        })
+        .leaf('fix', {
+          description: 'Apply a code action by title. Use code/actions first to see available actions, then pass the title here.',
+          requiredArgs: {
+            path: { type: 'string', description: 'File path' },
+            title: { type: 'string', description: 'Action title (exact or partial match)' },
+          },
+          optionalArgs: {
+            line: { type: 'number', description: 'Line number to narrow the search' },
+            end_line: { type: 'number', description: 'End line for range' },
+          },
+          handler: createCodeFixHandler(),
+        })
+        .leaf('rename', {
+          description: 'Rename a symbol across all files in the workspace. Safe, language-aware rename (not text replace).',
+          requiredArgs: {
+            path: { type: 'string', description: 'File containing the symbol' },
+            new_name: { type: 'string', description: 'New name for the symbol' },
+          },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Current symbol name to rename' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeRenameHandler(),
+        })
+        .leaf('format', {
+          description: 'Format a document or range using the configured formatter (Prettier, ESLint, etc.).',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          optionalArgs: {
+            line: { type: 'number', description: 'Start line (1-based) for range formatting' },
+            end_line: { type: 'number', description: 'End line for range formatting' },
+            tab_size: { type: 'number', description: 'Tab size', default: 2 },
+            insert_spaces: { type: 'boolean', description: 'Use spaces instead of tabs', default: true },
+          },
+          handler: createCodeFormatHandler(),
+        })
+        .leaf('calls', {
+          description: 'Show call hierarchy — who calls this function (incoming) and what it calls (outgoing). Much faster than grep for tracing call chains.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the function' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Function name' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            direction: { type: 'string', description: '"incoming", "outgoing", or "both" (default)', default: 'both' },
+          },
+          handler: createCodeCallHierarchyHandler(deps.codeMap),
+        })
+        .leaf('types', {
+          description: 'Show type hierarchy — supertypes (what this extends/implements) and subtypes (what extends/implements this).',
+          requiredArgs: { path: { type: 'string', description: 'File containing the class or interface' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Class or interface name' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            direction: { type: 'string', description: '"supertypes", "subtypes", or "both" (default)', default: 'both' },
+          },
+          handler: createCodeTypeHierarchyHandler(deps.codeMap),
+        })
+        .leaf('signature', {
+          description: 'Get function signature help — parameter names, types, and docs. Position the cursor inside a function call.',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol at call site' },
+            line: { type: 'number', description: 'Line number (1-based)' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            trigger_character: { type: 'string', description: 'Trigger character (e.g., "(", ",")' },
+          },
+          handler: createCodeSignatureHandler(),
+        })
+        .leaf('completions', {
+          description: 'Get code completions at a position. Shows what the language server suggests — useful for validating code or discovering available APIs.',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Partial text at the completion point' },
+            line: { type: 'number', description: 'Line number (1-based)' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            trigger_character: { type: 'string', description: 'Trigger character (e.g., ".")' },
+            max_results: { type: 'number', description: 'Max completions to return', default: 20 },
+          },
+          handler: createCodeCompletionsHandler(),
+        })
+        .leaf('inlay-hints', {
+          description: 'Get inlay hints (inferred types, parameter names) for a file or range. Shows type annotations the editor would display inline.',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          optionalArgs: {
+            line: { type: 'number', description: 'Start line (1-based)' },
+            end_line: { type: 'number', description: 'End line' },
+          },
+          handler: createCodeInlayHintsHandler(),
+        });
+    })
+
     // ── Shell execution ───────────────────────────────────────────
-    .branch('shell', 'Execute shell commands', (shell) => {
+    .branch('shell', 'Execute shell commands for builds, tests, installs, and other CLI tasks. shell/run executes and returns output, shell/background for long-running processes (dev servers, watchers), shell/terminal to interact with the VS Code integrated terminal. Prefer dedicated tools (file/*, git/*, search/*) over shell when they cover the need.', (shell) => {
       shell
         .leaf('run', {
           description: 'Execute a shell command and return stdout/stderr. Use for builds, tests, etc.',
@@ -166,14 +392,18 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           description: 'Send a command to the VS Code integrated terminal.',
           optionalArgs: {
             cmd: { type: 'string', description: 'Command to send (empty = just focus terminal)' },
-            name: { type: 'string', description: 'Terminal name', default: 'Obotovs' },
+            name: { type: 'string', description: 'Terminal name', default: 'Oboto VS' },
           },
           handler: createTerminalHandler(),
+        })
+        .leaf('state', {
+          description: 'Get the state of all open VS Code terminals.',
+          handler: createTerminalUiStateHandler(),
         });
     })
 
     // ── Git operations ────────────────────────────────────────────
-    .branch('git', 'Git version control operations', (git) => {
+    .branch('git', 'Git version control: status, diff, log, commit, branch, stash. Check git/status before committing to see what is staged. Use git/diff to review changes before committing. Use git/log to understand recent history.', (git) => {
       git
         .leaf('status', {
           description: 'Show git status (branch, staged/unstaged changes)',
@@ -218,29 +448,41 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             action: { type: 'string', description: 'Action: push, pop, list, drop', default: 'list' },
           },
           handler: createGitStashHandler(),
+        })
+        .leaf('review', {
+          description: 'Review current branch changes vs base branch. Gathers the diff, detects the base branch, and returns a structured review prompt. Then produce a code review based on the prompt.',
+          optionalArgs: {
+            base: { type: 'string', description: 'Base branch to diff against (default: auto-detect main/master/dev/develop)' },
+          },
+          handler: createGitReviewHandler(),
+        })
+        .leaf('review-uncommitted', {
+          description: 'Review all uncommitted changes (staged + unstaged). Gathers the diff against HEAD and returns a structured review prompt. Then produce a code review based on the prompt.',
+          handler: createGitReviewUncommittedHandler(),
         });
     })
 
     // ── Plan transition ────────────────────────────
-    .branch('plan', 'Transition between planning and acting', (p) => {
+    .branch('plan', 'Propose a plan to the user before executing complex multi-step work. Use plan/propose to show your plan and get approval — the user can accept, reject, or modify. If accepted, mode transitions automatically to act mode.', (p) => {
       p.leaf('propose', {
         description: 'Propose a plan to the user and transition from plan to act mode. If accepted, the mode transitions to act mode automatically.',
         requiredArgs: {
           plan: { type: 'string', description: 'The proposed plan to show the user' },
         },
-        handler: createPlanProposeHandler(deps.ask, deps.agent),
+        handler: deps.planPropose
+          ? createPlanProposeHandler(deps.planPropose, deps.agent)
+          : createPlanProposeHandler(deps.planPropose!, deps.agent),
       });
     })
 
 
     // ── System ─────────────────────────────────────────────────────
-    .branch('system', 'System-level operations', (sys) => {
-      
+    .branch('system', 'System operations: conversation observer and tool tree reload. Session notes are available under the `notes` module.', (sys) => {
       sys.leaf('observe', {
         description: 'Wait for and return new events from the target chat session. Used by subconscious background agents to monitor the conversation.',
-        handler: async (kwargs) => {
+        handler: async () => {
           if (!deps.agent) return '[ERROR] Agent deps not available';
-          return await createSystemObserveHandler(deps.agent)(kwargs);
+          return await createSystemObserveHandler(deps.agent)();
         }
       });
       sys.leaf('reload', {
@@ -252,7 +494,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       });
     })
     // ── User interaction (ask, secrets) ────────────────────────────
-    .branch('user', 'Ask the user questions or request secrets', (u) => {
+    .branch('user', 'Interact with the user directly. user/ask presents a multiple-choice question (for decisions and confirmations). user/secret prompts for sensitive values like API keys (never ask for secrets in plain text — always use this). Values from user/secret are auto-saved to .env.', (u) => {
       u
         .leaf('ask', {
           description: 'Ask the user a multiple-choice question at a decision point. Returns the choice the user selected. Use this when you need the user to pick a direction or confirm a non-obvious choice.',
@@ -279,7 +521,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── Chat window control ─────────────────────────────────────────
-    .branch('chat', 'Control the chat window — rename conversations, etc.', (chat) => {
+    .branch('chat', 'Control the chat window. Use chat/set_title to give this conversation a meaningful name based on the topic being discussed — helps the user identify conversations in the sidebar.', (chat) => {
       chat
         .leaf('set_title', {
           description: 'Set the title/name of this chat conversation window. Use this to give the conversation a meaningful name based on what is being discussed or worked on.',
@@ -321,8 +563,191 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           },
           handler: createSkillGetHandler(deps.skill),
         });
-    })
+    });
 
+    // ── Projects (project management, plans, tasks, reviews) ─────────
+    if (deps.project) {
+      const projectDeps = deps.project;
+      builder.branch('project', [
+        'Project management: initialize, plan, track tasks, review code, and audit progress.',
+        '',
+        'Use project/init to scaffold a new or existing project.',
+        'Use project/plan to create detailed implementation plans.',
+        'Use project/task to track individual work items.',
+        'Use project/review to record code reviews.',
+        'Use project/status for a dashboard summary.',
+        '',
+        'All plans, tasks, and reviews are persisted in .obotovs/projects/.',
+        'Plans should be detailed enough for third-party execution.',
+        'All executed work generates auditable task lists.',
+      ].join('\n'), (p) => {
+        p
+          .leaf('init', {
+            description: 'Initialize a new or existing project. For existing-codebase type, automatically scans for conventions.',
+            requiredArgs: {
+              name: { type: 'string', description: 'Project name' },
+              type: { type: 'string', description: 'Project type: "new-build", "existing-codebase", or "ad-hoc"' },
+            },
+            optionalArgs: {
+              description: { type: 'string', description: 'Brief project description' },
+              scan_conventions: { type: 'boolean', description: 'Auto-detect conventions for existing-codebase type (default: true)' },
+            },
+            handler: createProjectInitHandler(projectDeps),
+          })
+          .leaf('list', {
+            description: 'List all projects in this workspace.',
+            handler: createProjectListHandler(projectDeps),
+          })
+          .leaf('get', {
+            description: 'Get detailed dashboard for a project (plans, tasks, reviews, conventions).',
+            requiredArgs: {
+              id: { type: 'string', description: 'Project ID (slug)' },
+            },
+            handler: createProjectGetHandler(projectDeps),
+          })
+          .leaf('update', {
+            description: 'Update project metadata, status, conventions, or guidelines.',
+            requiredArgs: {
+              id: { type: 'string', description: 'Project ID' },
+            },
+            optionalArgs: {
+              name: { type: 'string', description: 'New name' },
+              description: { type: 'string', description: 'New description' },
+              status: { type: 'string', description: 'New status: draft, active, paused, completed' },
+              conventions: { type: 'string', description: 'JSON array of conventions' },
+              guidelines: { type: 'string', description: 'JSON array of guideline strings' },
+            },
+            handler: createProjectUpdateHandler(projectDeps),
+          })
+          .leaf('plan', {
+            description: 'Create a new implementation plan for a project. Plans should be detailed enough for third-party execution.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              title: { type: 'string', description: 'Plan title' },
+            },
+            optionalArgs: {
+              objective: { type: 'string', description: 'What the plan achieves' },
+              scope: { type: 'string', description: 'What is in/out of scope' },
+              steps: { type: 'string', description: 'JSON array of PlanStep objects' },
+              test_strategy: { type: 'string', description: 'How to verify the plan is complete' },
+              markdown: { type: 'string', description: 'Full markdown plan document' },
+            },
+            handler: createProjectPlanCreateHandler(projectDeps),
+          })
+          .leaf('plan-update', {
+            description: 'Update an existing plan (status, steps, etc.).',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              plan_id: { type: 'string', description: 'Plan ID (slug)' },
+            },
+            optionalArgs: {
+              status: { type: 'string', description: 'New status: draft, approved, in-progress, completed' },
+              title: { type: 'string', description: 'Updated title' },
+              objective: { type: 'string', description: 'Updated objective' },
+              scope: { type: 'string', description: 'Updated scope' },
+              steps: { type: 'string', description: 'Updated JSON array of PlanStep objects' },
+              test_strategy: { type: 'string', description: 'Updated test strategy' },
+              markdown: { type: 'string', description: 'Updated markdown body' },
+            },
+            handler: createProjectPlanUpdateHandler(projectDeps),
+          })
+          .leaf('plan-list', {
+            description: 'List all plans for a project, optionally filtered by status.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+            },
+            optionalArgs: {
+              status: { type: 'string', description: 'Filter by status' },
+            },
+            handler: createProjectPlanListHandler(projectDeps),
+          })
+          .leaf('task', {
+            description: 'Create a task to track work done. Use for audit trails of completed work.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              description: { type: 'string', description: 'What was done or needs to be done' },
+            },
+            optionalArgs: {
+              plan_id: { type: 'string', description: 'Link task to a plan' },
+              plan_step_id: { type: 'string', description: 'Link task to a specific plan step' },
+              status: { type: 'string', description: 'Task status: pending, in-progress, completed, blocked, skipped' },
+              assignee: { type: 'string', description: 'Who is doing this (agent ID or "user")' },
+              result: { type: 'string', description: 'What was accomplished' },
+              notes: { type: 'string', description: 'Additional context' },
+            },
+            handler: createProjectTaskCreateHandler(projectDeps),
+          })
+          .leaf('task-update', {
+            description: 'Update a task status or add results.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              task_id: { type: 'string', description: 'Task ID' },
+            },
+            optionalArgs: {
+              status: { type: 'string', description: 'New status' },
+              result: { type: 'string', description: 'What was accomplished' },
+              notes: { type: 'string', description: 'Additional context' },
+              assignee: { type: 'string', description: 'Who did this' },
+            },
+            handler: createProjectTaskUpdateHandler(projectDeps),
+          })
+          .leaf('task-list', {
+            description: 'List tasks for a project, optionally filtered by plan or status.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+            },
+            optionalArgs: {
+              plan_id: { type: 'string', description: 'Filter by plan' },
+              status: { type: 'string', description: 'Filter by status' },
+            },
+            handler: createProjectTaskListHandler(projectDeps),
+          })
+          .leaf('review', {
+            description: 'Record a code review with findings. Use after implementing features to audit quality.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              title: { type: 'string', description: 'Review title' },
+            },
+            optionalArgs: {
+              plan_id: { type: 'string', description: 'Link review to a plan' },
+              reviewed_files: { type: 'string', description: 'JSON array of file paths reviewed' },
+              findings: { type: 'string', description: 'JSON array of ReviewFinding objects with severity, file, line, description, resolved' },
+              summary: { type: 'string', description: 'Overall review summary' },
+              status: { type: 'string', description: 'Review status: pending, approved, changes-requested, completed' },
+            },
+            handler: createProjectReviewCreateHandler(projectDeps),
+          })
+          .leaf('review-update', {
+            description: 'Update a review status or add findings.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+              review_id: { type: 'string', description: 'Review ID' },
+            },
+            optionalArgs: {
+              status: { type: 'string', description: 'New status' },
+              summary: { type: 'string', description: 'Updated summary' },
+              findings: { type: 'string', description: 'Updated JSON array of findings' },
+            },
+            handler: createProjectReviewUpdateHandler(projectDeps),
+          })
+          .leaf('status', {
+            description: 'Get a formatted dashboard summary of a project: plans, tasks, reviews, conventions.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+            },
+            handler: createProjectStatusHandler(projectDeps),
+          })
+          .leaf('archive', {
+            description: 'Archive a completed project. Moves all plans, tasks, and reviews to archive/ for permanent record.',
+            requiredArgs: {
+              project_id: { type: 'string', description: 'Project ID' },
+            },
+            handler: createProjectArchiveHandler(projectDeps),
+          });
+      });
+    }
+
+    builder
     // ── Surfaces (AI-authored HTML pages rendered in VS Code panels) ──
     .branch('surface', [
       'Create, update, delete, list, and open surface HTML pages.',
@@ -386,6 +811,17 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           description: 'Open (or re-focus) a surface in a VS Code webview panel. Surfaces auto-open on creation, so this is mainly for re-opening a previously closed panel.',
           requiredArgs: { name: { type: 'string', description: 'Surface name to open' } },
           handler: createSurfaceOpenHandler(deps.surface),
+        })
+        .leaf('screenshot', {
+          description: [
+            'Capture a screenshot of an open surface\'s rendered output.',
+            'Returns the screenshot as a PNG image that you can see.',
+            'The surface must be open in a webview panel first (use surface/open if needed).',
+            'Use this to see what the user sees when viewing a surface, to verify visual output, or to debug layout issues.',
+          ].join(' '),
+          requiredArgs: { name: { type: 'string', description: 'Surface name to screenshot (must be open)' } },
+          optionalArgs: { label: { type: 'string', description: 'Optional label for the screenshot file (defaults to surface-name-timestamp)' } },
+          handler: createSurfaceScreenshotHandler(deps.surface),
         });
     })
 
@@ -577,7 +1013,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── VS Code commands ──────────────────────────────────────────
-    .branch('peer', 'Coordinate with other Oboto VS windows on this workspace', (p) => {
+    .branch('peer', 'Coordinate across VS Code windows. peer/list shows this window\'s agents and other Oboto VS windows. peer/send messages agents in this window. peer/dispatch sends tasks to other windows (requires user approval). peer/ask asks the other window\'s user a question. Use peer/debug to diagnose connectivity issues.', (p) => {
       p
         .leaf('list', {
           description: 'List peer Oboto VS windows (other VS Code windows running Oboto VS on this workspace) and the agents running in each. Includes diagnostic info when no peers are found. Read-only — safe to call any time.',
@@ -647,7 +1083,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         });
     })
 
-    .branch('vscode', 'Execute or discover VS Code commands', (v) => {
+    .branch('vscode', 'Execute any VS Code command by ID — a powerful escape hatch for actions not covered by other tools. Use vscode/list to discover commands (supports filtering), then vscode/run to execute. Use sparingly — prefer dedicated tools (file/*, code/*, git/*) when they cover the need.', (v) => {
       v
         .leaf('list', {
           description: 'List available VS Code command IDs. Use this to discover commands before calling "vscode run". Supports substring filtering.',
@@ -669,9 +1105,33 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           handler: createVscodeRunHandler(),
         });
     })
+    .branch('alephnet', 'Interact with the AlephNet Distributed Sentience Network. Use alephnet/think for semantic analysis, remember/recall for GMF storage, and chat to message other agents.', (v) => {
+      v
+        .leaf('think', {
+          description: 'Run semantic analysis on a text or concept.',
+          requiredArgs: { text: { type: 'string', description: 'Text to analyze' } },
+          handler: createAlephNetThinkHandler(),
+        })
+        .leaf('remember', {
+          description: 'Store a concept in the Global Memory Field.',
+          requiredArgs: { concept: { type: 'string', description: 'Name of the concept' }, content: { type: 'string', description: 'Content to store' } },
+          handler: createAlephNetRememberHandler(),
+        })
+        .leaf('recall', {
+          description: 'Query the Global Memory Field.',
+          requiredArgs: { query: { type: 'string', description: 'Search query' } },
+          optionalArgs: { threshold: { type: 'number', description: 'Similarity threshold (0.0 - 1.0)' } },
+          handler: createAlephNetRecallHandler(),
+        })
+        .leaf('chat', {
+          description: 'Send a direct message to another agent on the AlephNet mesh.',
+          requiredArgs: { peerId: { type: 'string', description: 'Target agent node ID' }, message: { type: 'string', description: 'Message content' } },
+          handler: createAlephNetChatHandler(),
+        });
+    })
 
     // ── Workspace ─────────────────────────────────────────────────
-    .branch('workspace', 'VS Code workspace information', (ws) => {
+    .branch('workspace', 'VS Code workspace state: diagnostics (TypeScript/lint errors and warnings), workspace info (root path, folders), and open editor tabs. Check workspace/diagnostics after making code changes to verify they compile cleanly.', (ws) => {
       ws
         .leaf('diagnostics', {
           description: 'Show TypeScript/lint errors and warnings from the workspace.',
@@ -697,7 +1157,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
   // agents cannot recursively spawn further agents.
   if (deps.agent) {
     const agentDeps = deps.agent;
-    builder.branch('agent', 'Spawn, query, list, and cancel background agents', (a) => {
+    builder.branch('agent', 'Spawn background agents for parallel work. Use agent/spawn to delegate independent subtasks (file searches, refactors, test runs) while you continue working. Use agent/batch to run multiple tasks and wait for all results. Use agent/collect to gather results from previously-spawned agents. Always prefer parallelism when tasks are independent — it is dramatically faster.', (a) => {
       a
         .leaf('spawn', {
           description:
@@ -713,7 +1173,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             systemPrompt: { type: 'string', description: 'Override the system prompt for this agent' },
             provider: { type: 'string', description: 'Provider override, e.g. "gemini", "anthropic"' },
             model: { type: 'string', description: 'Model override, e.g. "claude-haiku-4-5-20251001"' },
-            role: { type: 'string', description: 'Prompt routing role: "planner", "actor", "summarizer". Uses the provider/model configured in promptRouting settings for that role.' },
+            role: { type: 'string', description: 'Prompt routing role: "planner", "actor", "summarizer", "coder". Uses the provider/model configured in promptRouting settings for that role.' },
             budget_usd: { type: 'number', description: 'USD budget ceiling; agent is cancelled if exceeded' },
             timeout_ms: { type: 'number', description: 'Timeout in milliseconds' },
             await: { type: 'boolean', description: 'Wait for completion and return the result; default false' },
@@ -795,12 +1255,16 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     const memBranch = new BranchNode({
       name: 'memory',
       description:
-        'Hierarchical memory: conversation (this session) → project (this workspace) → global (across workspaces). Use add/recall/list/promote/forget.',
+        'Hierarchical memory system — USE THIS ACTIVELY. Start every task with memory/recall to check for relevant context from past work. ' +
+        'Save discoveries, user preferences, architectural decisions, and task outcomes with memory/add. ' +
+        'Three scopes: conversation (this session, default), project (persists across conversations in this workspace), global (across all workspaces). ' +
+        'Use memory/promote to elevate important facts to project or global scope. ' +
+        'Good memory hygiene means you never lose context across sessions and your assistance improves over time.',
     });
     memBranch.addChild(new LeafNode({
       name: 'add',
       description:
-        'Save a durable note to this conversation\'s memory. Use memory/promote to move noteworthy entries up to project or global scope.',
+        'Save a fact, preference, or discovery to conversation memory. Do this proactively — save user preferences, architectural decisions, task outcomes, and anything that would be useful in future conversations. Use memory/promote afterward to elevate important facts to project or global scope.',
       requiredArgs: {
         title: { type: 'string', description: 'Short label (e.g. "user prefers Python")' },
         body: { type: 'string', description: 'The fact or note to remember' },
@@ -814,7 +1278,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     memBranch.addChild(new LeafNode({
       name: 'recall',
       description:
-        'Retrieve relevant memories by semantic resonance. Returns top matches across conversation/project/global by default.',
+        'Retrieve relevant memories by semantic resonance. Call this at the START of every new task to check for prior context — user preferences, past decisions, project knowledge. Returns top matches across conversation/project/global by default. Also useful mid-task to recall specific facts.',
       requiredArgs: {
         query: { type: 'string', description: 'Free-text query; tokens guide the match' },
       },
@@ -827,7 +1291,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     memBranch.addChild(new LeafNode({
       name: 'promote',
       description:
-        'Move an entry to a higher scope so it persists beyond this conversation/workspace. Use sparingly for high-value facts.',
+        'Move an entry to a higher scope. Promote to "project" for facts relevant to this workspace (architecture, conventions, ongoing work). Promote to "global" for facts that apply everywhere (user preferences, role, general knowledge). Promoted facts persist across conversations.',
       requiredArgs: {
         id: { type: 'string', description: 'The entry id from memory/add or memory/recall' },
         to: { type: 'string', description: 'Target scope: "project" or "global"' },
@@ -861,8 +1325,8 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       customBranch.addChild(new LeafNode({
         name: t.name,
         description: t.description,
-        requiredArgs: t.requiredArgs || {},
-        optionalArgs: t.optionalArgs || {},
+        requiredArgs: (t.requiredArgs || {}) as Record<string, import('@sschepis/swiss-army-tool').ArgDescriptor>,
+        optionalArgs: (t.optionalArgs || {}) as Record<string, import('@sschepis/swiss-army-tool').ArgDescriptor>,
         handler: async (kwargs) => {
           if (!deps.agent) return '[ERROR] Agent deps not available for custom tool';
           return await t.handler(kwargs, deps.agent);
@@ -872,7 +1336,15 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     root.addChild(customBranch);
   }
 
+  // Session notes: auto-captured command log + AI observations
+  root.addChild(createNotesModule(sessionNotes));
+
   const router = new Router(root, session, { debug: false });
 
-  return { router, session };
+  // Middleware: auto-capture tool responses into session notes
+  router.use(createNotesMiddleware(sessionNotes));
+  // Middleware: block shell commands that have dedicated tools
+  router.use(createRedirectMiddleware(STANDARD_REDIRECTS));
+
+  return { router, session, notes: sessionNotes };
 }

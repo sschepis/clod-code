@@ -12,8 +12,18 @@ function git(args: string, cwd?: string): string {
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     }).trim();
   } catch (err: any) {
-    const output = (err.stdout?.toString() || '') + (err.stderr?.toString() || '');
-    return `[ERROR] git ${args}: ${output || err.message}`;
+    const output = ((err.stdout?.toString() || '') + (err.stderr?.toString() || '')).trim();
+    const msg = output || err.message;
+    if (msg.includes('not a git repository')) {
+      return `[ERROR] git ${args}: Not a git repository. The workspace root (${workDir}) is not inside a git repo. Initialize with git/commit after using shell/run "git init".`;
+    }
+    if (msg.includes('CONFLICT') || msg.includes('Merge conflict')) {
+      return `[ERROR] git ${args}: Merge conflict detected.\n${msg}\nResolve conflicts in the listed files, then stage and commit. Use file/read to inspect conflicting files.`;
+    }
+    if (msg.includes('nothing to commit')) {
+      return `[INFO] git ${args}: Nothing to commit — working tree is clean. Use git/status to verify.`;
+    }
+    return `[ERROR] git ${args}: ${msg}`;
   }
 }
 
@@ -42,7 +52,7 @@ export function createGitLogHandler() {
 export function createGitCommitHandler() {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const message = String(kwargs.message || '');
-    if (!message) return '[ERROR] Missing required argument: message';
+    if (!message) return '[ERROR] Missing required argument: message. Provide a commit message string. Optionally pass files (array of paths to stage) or all=true to stage everything.';
 
     const files = kwargs.files;
     if (files && Array.isArray(files)) {

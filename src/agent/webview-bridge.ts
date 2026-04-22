@@ -22,6 +22,7 @@ import type {
   ModelInfo,
   AgentSummary,
   AgentStatus,
+  RoutingMode,
 } from '../shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../shared/message-types';
 import type { AgentHost, HostEvent } from './agent-host';
@@ -40,8 +41,12 @@ interface AgentUiSlice {
   phase: PhaseState;
   cost: CostState;
   activeModel: ModelInfo;
+  triageModel?: ModelInfo;
+  routingMode: RoutingMode;
   streamingEventId: string | null;
   mode: 'act' | 'plan';
+  planApprovalMode?: 'auto' | 'manual';
+  consecutiveToolRounds: number;
 }
 
 export type SliceChangeListener = (agentId: string) => void;
@@ -76,7 +81,7 @@ export class WebviewBridge {
 
   // ── Slice lifecycle ──────────────────────────────────────────────────
 
-  ensureSlice(agentId: string, initialModel: ModelInfo, mode: 'act' | 'plan' = 'act'): AgentUiSlice {
+  ensureSlice(agentId: string, initialModel: ModelInfo, mode: 'act' | 'plan' = 'act', triageModel?: ModelInfo, routingMode: RoutingMode = 'dual'): AgentUiSlice {
     let slice = this.slices.get(agentId);
     if (!slice) {
       slice = {
@@ -85,8 +90,11 @@ export class WebviewBridge {
         phase: { phase: 'idle', message: '' },
         cost: { totalTokens: 0, totalCost: 0 },
         activeModel: initialModel,
+        triageModel,
+        routingMode,
         streamingEventId: null,
         mode,
+        consecutiveToolRounds: 0,
       };
       this.slices.set(agentId, slice);
     }
@@ -115,7 +123,7 @@ export class WebviewBridge {
     this.detach(agentId);
 
     // Pre-create slice so early events don't land in nothing
-    this.ensureSlice(agentId, host.getActiveModel());
+    this.ensureSlice(agentId, host.getActiveModel(), 'act', host.getTriageModel());
 
     const detach = host.on((event) => this.handleHostEvent(agentId, event));
     this.hostDetachers.set(agentId, detach);
@@ -201,6 +209,8 @@ export class WebviewBridge {
       phase: slice.phase,
       cost: slice.cost,
       activeModel: slice.activeModel,
+      triageModel: slice.triageModel,
+      routingMode: slice.routingMode,
       mode: slice.mode,
       agents: this.listAgentSummaries(),
       focusedAgentId: focusOverride ?? this.focusedAgentId,
@@ -307,11 +317,27 @@ export class WebviewBridge {
     this.post({ type: 'clear_stale_errors', agentId });
   }
 
+  setRoutingMode(agentId: string, mode: RoutingMode): void {
+    const slice = this.slices.get(agentId);
+    if (!slice) return;
+    slice.routingMode = mode;
+  }
+
   /** Update mode (act/plan) for a given slice. */
   setMode(agentId: string, mode: 'act' | 'plan'): void {
     const slice = this.slices.get(agentId);
     if (!slice) return;
     slice.mode = mode;
+  }
+
+  setPlanApprovalMode(agentId: string, mode: 'auto' | 'manual'): void {
+    const slice = this.slices.get(agentId);
+    if (!slice) return;
+    slice.planApprovalMode = mode;
+  }
+
+  getPlanApprovalMode(agentId: string): 'auto' | 'manual' | undefined {
+    return this.slices.get(agentId)?.planApprovalMode;
   }
 
   /** Returns slice.cost aggregated across all agents. */
@@ -351,8 +377,7 @@ export class WebviewBridge {
 
       case 'thought': {
         if (!event.text) return;
-        // If we're mid-stream, the assistant event is already built via tokens.
-        // Just close the streaming slot; don't duplicate the content.
+        slice.consecutiveToolRounds = 0;
         if (slice.streamingEventId) {
           slice.streamingEventId = null;
           return;
@@ -368,6 +393,7 @@ export class WebviewBridge {
       }
 
       case 'token': {
+        slice.consecutiveToolRounds = 0;
         if (!slice.streamingEventId) {
           slice.streamingEventId = `assistant-${Date.now()}-${rand()}`;
         }
@@ -394,6 +420,7 @@ export class WebviewBridge {
       }
 
       case 'tool_start': {
+        slice.streamingEventId = null;
         const eventId = `tool-${Date.now()}-${rand()}`;
         this.appendEvent(agentId, {
           id: eventId,
@@ -430,13 +457,41 @@ export class WebviewBridge {
         break;
       }
 
-      case 'tool_round':
-        // Suppressed: narrative events ("Just read file data...") added noise
-        // between every tool call. The individual ToolBlock entries are sufficient.
+      case 'tool_round': {
+        slice.consecutiveToolRounds++;
+        const NARRATIVE_THRESHOLD = 3;
+        if (slice.consecutiveToolRounds >= NARRATIVE_THRESHOLD) {
+          const summary = this.buildProgressSummary(slice);
+          if (summary) {
+            this.appendEvent(agentId, {
+              id: `narrative-${Date.now()}-${rand()}`,
+              role: 'narrative',
+              content: summary,
+              iteration: event.iteration,
+              totalToolCalls: event.totalToolCalls,
+              timestamp: now(),
+            });
+          }
+        }
         break;
+      }
+
+      case 'commentary': {
+        slice.consecutiveToolRounds = 0;
+        this.appendEvent(agentId, {
+          id: `narrative-${Date.now()}-${rand()}`,
+          role: 'narrative',
+          content: event.text,
+          iteration: 0,
+          totalToolCalls: 0,
+          timestamp: now(),
+        });
+        break;
+      }
 
       case 'turn_complete':
         slice.phase = { phase: 'idle', message: '' };
+        slice.consecutiveToolRounds = 0;
         this.post({ type: 'phase', agentId, phase: 'idle', message: '' });
         break;
 
@@ -478,14 +533,46 @@ export class WebviewBridge {
 
       case 'initialized':
         slice.activeModel = event.model;
+        slice.triageModel = event.triageModel;
         this.clearStaleErrors(agentId);
-        this.post({ type: 'model_changed', agentId, model: event.model });
+        this.post({ type: 'model_changed', agentId, model: event.model, triageModel: event.triageModel, routingMode: slice.routingMode });
         break;
 
       case 'disposed':
         // Host tells us it's gone; summaries/detach handled by notifyAgentDisposed
         break;
     }
+  }
+
+  private buildProgressSummary(slice: AgentUiSlice): string | null {
+    const events = slice.events;
+    const recentCalls: string[] = [];
+    for (let i = events.length - 1; i >= 0 && recentCalls.length < 8; i--) {
+      const e = events[i];
+      if (e.role === 'narrative' || e.role === 'assistant') break;
+      if (e.role === 'tool' && e.command) {
+        const cmd = e.command.split('/').pop() ?? e.command;
+        const target = this.extractTarget(e.kwargs);
+        recentCalls.unshift(target ? `${cmd} ${target}` : cmd);
+      }
+    }
+    if (recentCalls.length === 0) return null;
+    return recentCalls.join(' → ');
+  }
+
+  private extractTarget(kwargs?: Record<string, unknown>): string {
+    if (!kwargs) return '';
+    const path = (kwargs.path ?? kwargs.file ?? kwargs.filePath ?? kwargs.file_path ?? '') as string;
+    if (path) {
+      const parts = path.split('/');
+      return parts.length > 2 ? parts.slice(-2).join('/') : parts[parts.length - 1];
+    }
+    const pattern = (kwargs.pattern ?? kwargs.query ?? kwargs.cmd ?? '') as string;
+    if (pattern) {
+      const short = String(pattern).slice(0, 40);
+      return short.length < String(pattern).length ? `"${short}…"` : `"${short}"`;
+    }
+    return '';
   }
 }
 

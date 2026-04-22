@@ -9,7 +9,7 @@ export interface ProviderConfig {
   defaultModel?: string;
 }
 
-export type PromptRole = 'triage' | 'executor' | 'planner' | 'summarizer';
+export type PromptRole = 'triage' | 'executor' | 'planner' | 'summarizer' | 'coder';
 
 export interface RouteAssignment {
   providerId: string;
@@ -33,7 +33,9 @@ export interface ObotovsSettings {
   surfacesAutoOpen: boolean;
   uiControlEnabled: boolean;
   peerDispatchEnabled: boolean;
+  subconsciousEnabled: boolean;
   shell: string;
+  alephnet: { enabled: boolean; port: number; nodeId: string };
 }
 
 const DEFAULT_ROUTING: Record<string, RouteAssignment> = {
@@ -61,7 +63,9 @@ export function getSettings(): ObotovsSettings {
     surfacesAutoOpen: cfg.get<boolean>('surfacesAutoOpen', true),
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
+    subconsciousEnabled: cfg.get<boolean>('subconsciousEnabled', false),
     shell: cfg.get<string>('shell', ''),
+    alephnet: cfg.get<ObotovsSettings['alephnet']>('alephnet', { enabled: false, port: 31337, nodeId: '' }),
   };
 }
 

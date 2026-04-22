@@ -4,17 +4,16 @@
 
 /* VS Code webview inherits no default styles. Set sensible defaults. */
 :root {
-  color-scheme: dark;
+  color-scheme: dark light;
 }
 
 body {
   margin: 0;
   padding: 0;
-  background: #000;
-  color: #e4e4e7;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-    Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  font-size: 13px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif);
+  font-size: var(--vscode-editor-font-size, 13px);
   line-height: 1.5;
   overflow: hidden;
   height: 100vh;
@@ -32,11 +31,12 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--vscode-scrollbarSlider-background);
+  border: 1px solid var(--vscode-editor-background);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--vscode-scrollbarSlider-hoverBackground);
 }
 
 /* Code block styling */
@@ -51,7 +51,7 @@ code {
 
 /* Inline code in markdown */
 p code, li code {
-  background: rgba(63, 63, 70, 0.5);
+  background: color-mix(in srgb, var(--vscode-input-background) 50%, transparent);
   padding: 0.15em 0.4em;
   border-radius: 3px;
   font-size: 0.9em;
@@ -64,7 +64,7 @@ p code, li code {
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  color: #e4e4e7;
+  color: var(--vscode-editor-foreground);
   margin-top: 1em;
   margin-bottom: 0.5em;
   font-weight: 600;
@@ -74,9 +74,9 @@ p code, li code {
 .markdown-body h1 { font-size: 1.3em; }
 .markdown-body h2 { font-size: 1.15em; }
 .markdown-body h3 { font-size: 1.05em; }
-.markdown-body h4 { font-size: 1em; color: #d4d4d8; }
-.markdown-body h5 { font-size: 0.95em; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; }
-.markdown-body h6 { font-size: 0.9em; color: #71717a; }
+.markdown-body h4 { font-size: 1em; color: var(--vscode-editor-foreground); }
+.markdown-body h5 { font-size: 0.95em; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.04em; }
+.markdown-body h6 { font-size: 0.9em; color: var(--vscode-disabledForeground); }
 
 /* Heading anchor hash — models often emit hash-style links in headings */
 .markdown-body h1 a, .markdown-body h2 a, .markdown-body h3 a,
@@ -90,11 +90,11 @@ p code, li code {
   border-collapse: collapse;
   margin: 0.5em 0;
   font-size: 0.9em;
-  color: #e4e4e7;
+  color: var(--vscode-editor-foreground);
 }
 .markdown-body thead { background: rgba(63, 63, 70, 0.4); }
 .markdown-body th, .markdown-body td {
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--vscode-panel-border);
   padding: 0.35em 0.6em;
 }
 
@@ -107,12 +107,12 @@ p code, li code {
 /* Horizontal rule */
 .markdown-body hr {
   border: 0;
-  border-top: 1px solid #3f3f46;
+  border-top: 1px solid var(--vscode-panel-border);
   margin: 1em 0;
 }
 
 /* KaTeX (math) — dark-theme tuning */
-.markdown-body .katex { color: #e4e4e7; font-size: 1em; }
+.markdown-body .katex { color: var(--vscode-editor-foreground); font-size: 1em; }
 .markdown-body .katex-display {
   margin: 0.75em 0;
   overflow-x: auto;
@@ -143,14 +143,14 @@ p code, li code {
 }
 
 .markdown-body blockquote {
-  border-left: 3px solid #3f3f46;
+  border-left: 3px solid var(--vscode-panel-border);
   padding-left: 1em;
-  color: #a1a1aa;
+  color: var(--vscode-descriptionForeground);
   margin: 0.5em 0;
 }
 
 .markdown-body a {
-  color: #818cf8;
+  color: var(--vscode-textLink-foreground);
   text-decoration: none;
 }
 .markdown-body a:hover {
@@ -160,14 +160,14 @@ p code, li code {
 /* Diff highlighting */
 .diff-add {
   background: rgba(16, 185, 129, 0.15);
-  color: #6ee7b7;
+  color: var(--vscode-textPreformat-foreground, #6ee7b7);
 }
 .diff-remove {
   background: rgba(239, 68, 68, 0.15);
   color: #fca5a5;
 }
 .diff-header {
-  color: #818cf8;
+  color: var(--vscode-textLink-foreground);
 }
 
 /* Textarea reset */

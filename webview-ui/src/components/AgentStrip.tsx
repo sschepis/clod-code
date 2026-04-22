@@ -17,9 +17,9 @@ export const AgentStrip: React.FC<AgentStripProps> = ({ agents, focusedAgentId, 
   if (background.length === 0) return null;
 
   return (
-    <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950/60 px-3 py-2 overflow-x-auto">
+    <div className="flex-shrink-0 border-t border-vscode-panelBorder bg-vscode-editorBg/60 px-3 py-2 overflow-x-auto">
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-zinc-500 font-medium uppercase tracking-wider shrink-0 mr-1">
+        <span className="text-vscode-desc font-medium uppercase tracking-wider shrink-0 mr-1">
           Agents
         </span>
 
@@ -29,7 +29,7 @@ export const AgentStrip: React.FC<AgentStripProps> = ({ agents, focusedAgentId, 
           className={`shrink-0 flex items-center gap-1.5 px-2 py-1 rounded border transition-colors ${
             focusedAgentId === FOREGROUND_AGENT_ID
               ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200'
-              : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+              : 'bg-vscode-widgetBg border-vscode-panelBorder text-vscode-desc hover:text-vscode-editorFg hover:border-vscode-widgetBorder'
           }`}
           title="Main chat"
         >
@@ -70,10 +70,10 @@ const AgentPill: React.FC<AgentPillProps> = ({ agent, focused, syncScore, onFocu
       case 'error':
         return <AlertTriangle size={12} className="text-red-400" />;
       case 'cancelled':
-        return <XCircle size={12} className="text-zinc-500" />;
+        return <XCircle size={12} className="text-vscode-desc" />;
       case 'idle':
       default:
-        return <Bot size={12} className="text-zinc-500" />;
+        return <Bot size={12} className="text-vscode-desc" />;
     }
   })();
 
@@ -83,7 +83,7 @@ const AgentPill: React.FC<AgentPillProps> = ({ agent, focused, syncScore, onFocu
     ? 'bg-amber-500/10 border-amber-500/30 text-amber-200 hover:bg-amber-500/15'
     : agent.status === 'error'
     ? 'bg-red-500/10 border-red-500/30 text-red-200 hover:bg-red-500/15'
-    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700';
+    : 'bg-vscode-widgetBg border-vscode-panelBorder text-vscode-desc hover:text-vscode-editorFg hover:border-vscode-widgetBorder';
 
   return (
     <div
@@ -93,7 +93,7 @@ const AgentPill: React.FC<AgentPillProps> = ({ agent, focused, syncScore, onFocu
     >
       {StatusIcon}
       <span className="truncate">{agent.label}</span>
-      <span className="text-[10px] text-zinc-500 font-mono shrink-0">
+      <span className="text-[10px] text-vscode-desc font-mono shrink-0">
         ${agent.cost.totalCost.toFixed(3)}
       </span>
       {agent.status === 'running' && syncScore != null && syncScore > 0.05 && (
@@ -118,7 +118,7 @@ const AgentPill: React.FC<AgentPillProps> = ({ agent, focused, syncScore, onFocu
             e.stopPropagation();
             onCancel(agent.id);
           }}
-          className="ml-1 p-0.5 rounded hover:bg-zinc-700/60 text-zinc-500 hover:text-red-300"
+          className="ml-1 p-0.5 rounded hover:bg-vscode-hoverBg/60 text-vscode-desc hover:text-red-300"
           title="Cancel this agent"
         >
           <X size={12} />

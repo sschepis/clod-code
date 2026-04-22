@@ -22,13 +22,13 @@ export const ToolResultBlock: React.FC<ToolResultBlockProps> = ({ toolName, outp
   }
 
   return (
-    <div className="my-2 bg-[#0c0c0c] border border-zinc-800 rounded-md overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
-        <Icon size={14} className="text-zinc-500" />
-        <span className="text-xs text-zinc-400 font-mono">{toolName} result</span>
+    <div className="my-2 bg-[#0c0c0c] border border-vscode-panelBorder rounded-md overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-vscode-widgetBg/80 border-b border-vscode-panelBorder">
+        <Icon size={14} className="text-vscode-desc" />
+        <span className="text-xs text-vscode-desc font-mono">{toolName} result</span>
       </div>
-      <div className="p-3 text-xs font-mono overflow-x-auto leading-relaxed text-zinc-300 whitespace-pre-wrap">
-        {cleanOutput.trim() || <span className="text-zinc-600 italic">No output</span>}
+      <div className="p-3 text-xs font-mono overflow-x-auto leading-relaxed text-vscode-editorFg whitespace-pre-wrap">
+        {cleanOutput.trim() || <span className="text-vscode-disabled italic">No output</span>}
       </div>
     </div>
   );

@@ -1,10 +1,13 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import SettingsApp from './SettingsApp';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles/main.css';
 
 ReactDOM.createRoot(document.getElementById('settings-root')!).render(
   <React.StrictMode>
-    <SettingsApp />
+    <ErrorBoundary>
+      <SettingsApp />
+    </ErrorBoundary>
   </React.StrictMode>
 );

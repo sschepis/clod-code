@@ -1,30 +1,30 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { MemoryField } from './memory-field';
-import { initEncoder, encode } from './encoding';
+import { initEncoder, encodeEntry } from './encoding';
 
 beforeAll(async () => {
   await initEncoder();
 });
 
 describe('MemoryField — encoding & recall', () => {
-  it('encode is deterministic', () => {
-    const a = encode('hello world');
-    const b = encode('hello world');
+  it('encodeEntry is deterministic', async () => {
+    const a = await encodeEntry('hello world');
+    const b = await encodeEntry('hello world');
     expect(a).toEqual(b);
   });
 
-  it('recall ranks the exact match first', () => {
+  it('recall ranks the exact match first', async () => {
     const f = new MemoryField('conversation');
     f.add({ title: 'python', body: 'I prefer Python for ML work', tags: ['language', 'preference'], strength: 0.7 });
     f.add({ title: 'typescript', body: 'TypeScript is my language for web apps', tags: ['language', 'preference'], strength: 0.7 });
     f.add({ title: 'weather', body: 'It rains a lot in Seattle', tags: ['location'], strength: 0.5 });
 
-    const hits = f.recall('TypeScript web apps', 3);
+    const hits = await f.recall('TypeScript web apps', 3);
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].entry.title).toBe('typescript');
   });
 
-  it('unrelated query scores lower than matching query', () => {
+  it('unrelated query scores lower than matching query', async () => {
     const f = new MemoryField('conversation');
     // Note: the underlying resonance score operates on a deterministic
     // hash-to-prime encoding of the whole string, so recall is essentially
@@ -32,8 +32,10 @@ describe('MemoryField — encoding & recall', () => {
     // a query that shares no tokens with the entry to verify zero-score.
     f.add({ title: 'unix', body: 'grep search text cli tool', tags: ['tools'], strength: 0.7 });
 
-    const match = f.recall('grep search text cli tool', 1)[0];
-    const miss = f.recall('xyzzy frobnicate', 1)[0];
+    const matchHits = await f.recall('grep search text cli tool', 1);
+    const missHits = await f.recall('xyzzy frobnicate', 1);
+    const match = matchHits[0];
+    const miss = missHits[0];
     expect(match.score).toBeGreaterThanOrEqual(miss.score);
     expect(match.score).toBeGreaterThan(0);
   });

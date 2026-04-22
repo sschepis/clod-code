@@ -33,6 +33,8 @@ export interface SurfaceManagerOptions {
   getRoutesUrl: () => string | null;
   /** Called when a surface webview reports a JS runtime error. */
   onSurfaceError?: (error: SurfaceError) => void;
+  /** Called when a surface panel is closed. */
+  onSurfaceClosed?: (name: string) => void;
   /** Called when a surface requests to submit text to an agent. */
   onSubmitToAgent?: (text: string, agentId?: string) => void;
   /** Called when a surface requests to execute a tool. */
@@ -121,7 +123,7 @@ export class SurfaceManager {
       filePath: file,
       workspaceRoot: root,
       routesUrl: this.opts.getRoutesUrl(),
-      onDispose: () => { this.panels.delete(name); },
+      onDispose: () => { this.panels.delete(name); this.opts.onSurfaceClosed?.(name); },
       onError: this.opts.onSurfaceError,
     });
     this.panels.set(name, panel);
@@ -143,6 +145,13 @@ export class SurfaceManager {
     if (!result.ok && result.reason) {
       vscode.window.showErrorMessage(result.reason);
     }
+  }
+
+  /** Capture the rendered output of a surface as a PNG buffer. */
+  async captureSurface(name: string): Promise<Buffer> {
+    const panel = this.panels.get(name);
+    if (!panel) throw new Error(`Surface "${name}" is not open. Open it first with surface/open.`);
+    return panel.capture();
   }
 
   /** Called by the orchestrator when the routes server base URL changes. */

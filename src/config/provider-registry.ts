@@ -26,6 +26,14 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     requiresApiKey: false,
     isLocal: true,
   },
+  openclaw: {
+    name: 'openclaw',
+    displayName: 'OpenClaw Gateway',
+    envKeyVar: '',
+    defaultBaseUrl: 'http://localhost:8099/v1',
+    requiresApiKey: false,
+    isLocal: true,
+  },
   openai: {
     name: 'openai',
     displayName: 'OpenAI',
@@ -136,6 +144,7 @@ export function normalizeBaseUrl(providerName: string, baseUrl: string | undefin
   if (!trimmed) return undefined;
 
   const isLocalCompat =
+    providerName === 'openclaw' ||
     providerName === 'lmstudio' ||
     providerName === 'ollama';
   if (!isLocalCompat) return trimmed;

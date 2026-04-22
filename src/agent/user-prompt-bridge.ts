@@ -10,9 +10,15 @@ export interface SecretResult {
   saveToFile?: boolean;
 }
 
+export interface PlanApprovalResult {
+  denied: boolean;
+  approvalMode?: 'auto' | 'manual';
+}
+
 type Pending =
   | { kind: 'question'; resolve: (r: QuestionResult) => void }
-  | { kind: 'secret'; resolve: (r: SecretResult) => void };
+  | { kind: 'secret'; resolve: (r: SecretResult) => void }
+  | { kind: 'plan_approval'; resolve: (r: PlanApprovalResult) => void };
 
 class UserPromptBridge {
   private pending = new Map<string, Pending>();
@@ -51,9 +57,24 @@ class UserPromptBridge {
     return true;
   }
 
+  registerPlanApproval(id: string): Promise<PlanApprovalResult> {
+    return new Promise((resolve) => {
+      this.pending.set(id, { kind: 'plan_approval', resolve });
+    });
+  }
+
+  resolvePlanApproval(id: string, result: PlanApprovalResult): boolean {
+    const entry = this.pending.get(id);
+    if (!entry || entry.kind !== 'plan_approval') return false;
+    this.pending.delete(id);
+    entry.resolve(result);
+    return true;
+  }
+
   cancelAll(): void {
     for (const [, entry] of this.pending) {
       if (entry.kind === 'question') entry.resolve({ cancelled: true });
+      else if (entry.kind === 'plan_approval') entry.resolve({ denied: true });
       else entry.resolve({ cancelled: true });
     }
     this.pending.clear();

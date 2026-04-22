@@ -3,12 +3,18 @@ import * as vscode from 'vscode';
 export function createFileReadHandler() {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const filePath = String(kwargs.path || '');
-    if (!filePath) return '[ERROR] Missing required argument: path';
+    if (!filePath) return '[ERROR] Missing required argument: path. Provide an absolute path or workspace-relative path (e.g. "src/index.ts"). Use search/glob to find files by pattern.';
 
     try {
       const uri = vscode.Uri.file(filePath);
-      const content = await vscode.workspace.fs.readFile(uri);
-      const text = new TextDecoder().decode(content);
+      let text: string;
+      const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
+      if (doc) {
+        text = doc.getText();
+      } else {
+        const content = await vscode.workspace.fs.readFile(uri);
+        text = new TextDecoder().decode(content);
+      }
       const lines = text.split('\n');
 
       const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0;
@@ -24,7 +30,17 @@ export function createFileReadHandler() {
 
       return result;
     } catch (err) {
-      return `[ERROR] Failed to read file '${filePath}': ${err instanceof Error ? err.message : String(err)}`;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('ENOENT') || msg.includes('FileNotFound')) {
+        return `[ERROR] File not found: '${filePath}'. Check the path is correct — use search/glob to find files by name pattern, or workspace/info to see the workspace root.`;
+      }
+      if (msg.includes('EACCES') || msg.includes('permission')) {
+        return `[ERROR] Permission denied reading '${filePath}': ${msg}. The file exists but cannot be read — check file permissions.`;
+      }
+      if (msg.includes('EISDIR')) {
+        return `[ERROR] '${filePath}' is a directory, not a file. Use search/glob to list files in a directory (e.g. pattern="${filePath}/**/*").`;
+      }
+      return `[ERROR] Failed to read file '${filePath}': ${msg}`;
     }
   };
 }

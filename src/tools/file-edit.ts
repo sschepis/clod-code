@@ -96,15 +96,21 @@ interface EditOp {
   new_string: string;
 }
 
-export function createFileEditHandler() {
+export function createFileEditHandler(onFileChanged?: (filePath: string) => void) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const filePath = String(kwargs.path || '');
     if (!filePath) return '[ERROR] Missing required argument: path';
 
     try {
       const uri = vscode.Uri.file(filePath);
-      const existing = await vscode.workspace.fs.readFile(uri);
-      const content = new TextDecoder().decode(existing);
+      let content: string;
+      const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
+      if (doc) {
+        content = doc.getText();
+      } else {
+        const existing = await vscode.workspace.fs.readFile(uri);
+        content = new TextDecoder().decode(existing);
+      }
 
       const replaceAll = kwargs.replace_all === true;
 
@@ -204,6 +210,7 @@ export function createFileEditHandler() {
 
       // ── Write via WorkspaceEdit (undo-aware) or filesystem ────
       await applyContent(uri, content, updated);
+      onFileChanged?.(filePath);
 
       const editCount = ops.length === 1 ? '' : ` (${ops.length} edits)`;
       return `[SUCCESS] Edited ${filePath}${editCount}\n${diffs.join('\n\n')}`;
@@ -223,7 +230,7 @@ async function applyContent(uri: vscode.Uri, originalContent: string, updatedCon
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       doc.positionAt(0),
-      doc.positionAt(originalContent.length),
+      doc.positionAt(doc.getText().length),
     );
     edit.replace(uri, fullRange, updatedContent);
     await vscode.workspace.applyEdit(edit);

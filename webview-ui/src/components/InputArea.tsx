@@ -150,8 +150,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
   if (disabled) {
     return (
-      <div className="relative p-4 bg-zinc-950 border-t border-zinc-800 z-20">
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg px-4 py-3 text-xs text-zinc-500 text-center">
+      <div className="relative p-4 bg-vscode-editorBg border-t border-vscode-panelBorder z-20">
+        <div className="bg-vscode-widgetBg/60 border border-vscode-panelBorder rounded-lg px-4 py-3 text-xs text-vscode-desc text-center">
           {disabledReason ?? 'Input is disabled'}
         </div>
       </div>
@@ -159,7 +159,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
   }
 
   return (
-    <div className="relative p-4 bg-zinc-950 border-t border-zinc-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-20">
+    <div className="relative p-4 bg-vscode-editorBg border-t border-vscode-panelBorder shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-20">
       {/* Slash command menu */}
       {showSlashCommands && (
         <SlashCommandMenu
@@ -171,13 +171,13 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
       <div className="flex flex-col gap-3">
         {/* Input wrapper */}
-        <div className="relative flex flex-col bg-zinc-900 border border-zinc-700 rounded-lg focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-500 transition-shadow overflow-hidden">
+        <div className="relative flex flex-col bg-vscode-widgetBg border border-vscode-widgetBorder rounded-lg focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-500 transition-shadow overflow-hidden">
 
           {/* Attachments */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3 pb-1">
               {attachments.map(att => (
-                <div key={att.id} className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-md py-1 pl-2 pr-1 text-xs text-zinc-300">
+                <div key={att.id} className="flex items-center gap-2 bg-vscode-inputBg border border-vscode-widgetBorder rounded-md py-1 pl-2 pr-1 text-xs text-vscode-editorFg">
                   {att.type === 'image' ? (
                     <div className="flex items-center gap-1.5">
                       {att.url && <img src={att.url} alt="pasted" className="w-4 h-4 object-cover rounded-sm" />}
@@ -191,7 +191,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                   )}
                   <button
                     onClick={() => removeAttachment(att.id)}
-                    className="p-0.5 hover:bg-zinc-700 rounded-md text-zinc-500 hover:text-zinc-300 transition-colors"
+                    className="p-0.5 hover:bg-vscode-hoverBg rounded-md text-vscode-desc hover:text-vscode-editorFg transition-colors"
                   >
                     <X size={14} />
                   </button>
@@ -202,7 +202,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
           {/* Textarea */}
           <div className="relative flex items-end">
-            <div className="absolute left-4 bottom-3.5 text-zinc-500">
+            <div className="absolute left-4 bottom-3.5 text-vscode-desc">
               <ArrowRight size={16} />
             </div>
 
@@ -213,18 +213,19 @@ export const InputArea: React.FC<InputAreaProps> = ({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               rows={1}
+              aria-label="Message input"
               placeholder={isInterrupting
                 ? "Stopping agent..."
                 : isProcessing
                 ? "Agent is working... press Esc to interrupt"
                 : "Give the agent a command, type '/' for actions, or paste images/logs..."
               }
-              className="w-full bg-transparent border-none py-3.5 pl-12 pr-40 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-[200px]"
+              className="w-full bg-transparent border-none py-3.5 pl-12 pr-40 text-sm text-vscode-editorFg placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-[200px]"
               style={{ scrollbarWidth: 'thin' }}
             />
 
             {/* Mode toggle + Stop button */}
-            <div className="absolute right-2 bottom-2 flex items-center gap-1.5 p-1 bg-zinc-900 rounded-md z-10">
+            <div role="toolbar" aria-label="Input actions" className="absolute right-2 bottom-2 flex items-center gap-1.5 p-1 bg-vscode-widgetBg rounded-md z-10">
               {isProcessing && (
                 <button
                   onClick={handleInterrupt}
@@ -248,17 +249,17 @@ export const InputArea: React.FC<InputAreaProps> = ({
                     ? 'text-amber-400 cursor-wait'
                     : isListening
                     ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30 recording-pulse'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                    : 'text-vscode-desc hover:text-vscode-editorFg hover:bg-vscode-inputBg'
                 }`}
                 title={isTranscribing ? 'Transcribing...' : isListening ? 'Stop recording' : 'Start voice input'}
               >
                 {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : isListening ? <MicOff size={14} /> : <Mic size={14} />}
               </button>
-              <div className="flex bg-zinc-950 rounded-md p-0.5 border border-zinc-800">
+              <div className="flex bg-vscode-editorBg rounded-md p-0.5 border border-vscode-panelBorder">
                 <button
                   onClick={() => onModeChange('plan')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                    mode === 'plan' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                    mode === 'plan' ? 'bg-vscode-inputBg text-vscode-editorFg shadow-sm' : 'text-vscode-desc hover:text-vscode-editorFg'
                   }`}
                 >
                   <Map size={12} className={mode === 'plan' ? 'text-blue-400' : ''} /> Plan
@@ -266,7 +267,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 <button
                   onClick={() => onModeChange('act')}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                    mode === 'act' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                    mode === 'act' ? 'bg-vscode-inputBg text-vscode-editorFg shadow-sm' : 'text-vscode-desc hover:text-vscode-editorFg'
                   }`}
                 >
                   <Zap size={12} className={mode === 'act' ? 'text-amber-400' : ''} /> Act
@@ -283,7 +284,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
         )}
 
         {/* Footer metadata */}
-        <div className="flex justify-between items-center text-xs text-zinc-600 px-1">
+        <div className="flex justify-between items-center text-xs text-vscode-disabled px-1">
           <div className="flex items-center gap-4">
             <span>Model: {activeModel}</span>
             {isTranscribing ? (
@@ -298,7 +299,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
               </span>
             ) : (
               <span className="flex items-center gap-1">
-                <kbd className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[10px] font-sans">Enter</kbd> to send
+                <kbd className="bg-vscode-inputBg border border-vscode-widgetBorder rounded px-1.5 py-0.5 text-[10px] font-sans">Enter</kbd> to send
               </span>
             )}
           </div>

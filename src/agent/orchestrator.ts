@@ -19,9 +19,9 @@ import type { SidebarProvider } from '../vscode-integration/sidebar-provider';
 import type { ObotovsSettings } from '../config/settings';
 import type {
   WebviewToExtMessage, ExtToWebviewMessage, SessionEvent,
-  ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo,
+  ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo, ProjectInfo,
   MemoryInfo, ConversationInfo, ObjectCategory, ObjectActionKind,
-  Attachment,
+  Attachment, RoutingMode,
 } from '../shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../shared/message-types';
 
@@ -29,7 +29,7 @@ import { AgentHost } from './agent-host';
 import { AgentManager } from './agent-manager';
 import { WebviewBridge } from './webview-bridge';
 import { buildToolTree } from './tool-tree';
-import { pushSubconsciousEvent } from '../tools';
+import { pushSubconsciousEvent, CodeMap } from '../tools';
 import { SessionStore } from './session-store';
 import { getUserPromptBridge } from './user-prompt-bridge';
 import { getAgentRuntime } from './runtime';
@@ -37,6 +37,7 @@ import { SurfaceManager } from '../surfaces/surface-manager';
 import type { SurfaceError } from '../surfaces/surface-panel';
 import { RouteManager } from '../routes/route-manager';
 import { SkillManager } from '../skills/skill-manager';
+import { ProjectManager } from '../projects/project-manager';
 import { PeerManager } from '../peers/peer-manager';
 import { DispatchRegistry } from '../peers/dispatch-registry';
 import { PeerAskRegistry } from '../peers/peer-ask-registry';
@@ -53,89 +54,22 @@ import type {
 import { logger } from '../shared/logger';
 import { MAX_ATTACHMENT_TEXT_LENGTH } from '../shared/constants';
 import { SpeechToText } from '../audio/speech-to-text';
-
-const PLAN_MODE_PREAMBLE =
-  `[PLAN MODE — DO NOT write code, edit files, or make any changes. ` +
-  `Your only permitted tools are search/grep, search/glob, and file/read. ` +
-  `Do NOT use file/write, file/edit, shell/run, or any tool that modifies state.\n\n` +
-
-  `## Your Goal\n` +
-  `Produce an implementation plan so detailed and unambiguous that a developer (or AI) could execute it ` +
-  `with zero questions, zero guesswork, and zero need to re-explore the codebase.\n\n` +
-
-  `## Phase 1 — Deep Exploration (spend the majority of your effort here)\n` +
-  `Before writing a single line of plan, exhaustively explore every part of the codebase that the task touches. ` +
-  `The most common planning failure is a shallow read — you MUST go deep.\n\n` +
-  `For each area the task involves:\n` +
-  `1. Read the FULL file, not just the function you think matters. Understand the surrounding code, imports, ` +
-  `   exports, and how other callers use it.\n` +
-  `2. Trace call chains end-to-end. If the task changes a function, find every caller and every callee. ` +
-  `   If it changes a type, find every usage. If it changes a message, trace it from sender to receiver.\n` +
-  `3. Search for existing patterns. Before proposing new code, grep for similar functionality that already ` +
-  `   exists — existing utilities, helpers, constants, hooks, or abstractions you should reuse.\n` +
-  `4. Read test files for the code you're planning to change. Understand what's covered and what test ` +
-  `   patterns the project uses.\n` +
-  `5. Check for conventions. Read 2-3 similar files to understand naming, file organization, import style, ` +
-  `   error handling patterns, and architectural boundaries the project follows.\n` +
-  `6. Identify shared types and interfaces. Read the type definitions that will be affected and understand ` +
-  `   their full shape, not just the fields you plan to add.\n\n` +
-
-  `## Phase 2 — Produce the Plan\n` +
-  `Structure your plan as follows:\n\n` +
-
-  `### Context\n` +
-  `Explain in 2-3 sentences why this change is being made and what outcome the user wants.\n\n` +
-
-  `### Files to Modify\n` +
-  `For EACH file, provide:\n` +
-  `- **File path** and a one-line summary of why it's changing\n` +
-  `- **Exact location**: the function/class/block being modified, with line numbers from your read\n` +
-  `- **Current code**: quote the specific lines being changed (not the whole file, just the change site)\n` +
-  `- **What to change**: describe the modification precisely — new parameters, new branches, new imports, ` +
-  `  renamed fields, added/removed lines. Be specific enough that the implementer doesn't need to re-read ` +
-  `  the file to understand the edit.\n` +
-  `- **Reuse**: name any existing functions, types, constants, or patterns from the codebase that should be ` +
-  `  used, with their file paths. Never propose creating something that already exists.\n\n` +
-
-  `### New Files (if any)\n` +
-  `For each new file:\n` +
-  `- **File path** and purpose\n` +
-  `- **Exports**: what it exports and who will import it\n` +
-  `- **Key logic**: describe the core implementation — not pseudocode, but a clear specification of behavior, ` +
-  `  edge cases, and how it integrates with existing code\n` +
-  `- **Patterns to follow**: reference an existing file in the project that this new file should mirror in ` +
-  `  style and structure\n\n` +
-
-  `### Integration Points\n` +
-  `Describe how the changes connect across files — message flow, type propagation, import chains, ` +
-  `event wiring. This is where plans most often fail: the individual file changes are correct but ` +
-  `they don't connect properly.\n\n` +
-
-  `### Edge Cases & Risks\n` +
-  `List specific things that could go wrong and how the plan accounts for them.\n\n` +
-
-  `### Verification\n` +
-  `Numbered steps to test the change end-to-end — build commands, manual test steps, what to check.\n\n` +
-
-  `### Parallel Opportunities\n` +
-  `Identify which file changes or steps from the plan above are independent and could run in parallel ` +
-  `using agent/batch. Group them into parallel batches. Example:\n` +
-  `- Batch 1 (parallel): types.ts + constants.ts (no dependency between them)\n` +
-  `- Sequential: handler.ts (depends on types.ts)\n` +
-  `- Batch 2 (parallel): test-handler.test.ts + test-types.test.ts\n` +
-  `If the plan is simple enough that everything is sequential, say so and explain why.\n\n` +
-
-  `## Rules\n` +
-  `- Do NOT hand-wave. "Update the handler to support X" is not a plan — specify which handler, ` +
-  `  what the current code looks like, and exactly what changes.\n` +
-  `- Do NOT propose abstractions, refactors, or cleanups beyond what the task requires.\n` +
-  `- Do NOT guess at code structure. If you're unsure, read more files before writing the plan.\n` +
-  `- Every file path, function name, and type name in your plan must come from an actual read — ` +
-  `  never from memory or assumption.]\n\n`;
-
-function wrapPlanMode(text: string): string {
-  return PLAN_MODE_PREAMBLE + text;
-}
+import {
+  wrapPlanMode,
+  SUBCONSCIOUS_OBSERVER_TASK,
+  interAgentMessage,
+  interAgentSentConfirmation,
+  INTER_AGENT_TIMEOUT,
+  INTER_AGENT_SLICE_NOT_FOUND,
+  INTER_AGENT_NO_TEXT_RESPONSE,
+  surfaceAutoFixPrompt,
+  surfaceCrashedNotice,
+  WORKING_ON_PLAN,
+  LOOKING_INTO_THAT,
+  AGENT_INITIALIZING,
+  peerDispatchQuestion,
+  dispatchConfirmation,
+} from '../prompts';
 
 function inlineTextAttachments(text: string, attachments?: Attachment[]): string {
   if (!attachments || attachments.length === 0) return text;
@@ -166,13 +100,15 @@ export class Orchestrator {
   private readonly routeManager: RouteManager;
   private readonly surfaceManager: SurfaceManager;
   private readonly skillManager: SkillManager;
+  private readonly projectManager: ProjectManager;
   private readonly peerManager: PeerManager;
   private readonly dispatches: DispatchRegistry;
   private readonly peerAsks: PeerAskRegistry;
   private readonly windowId: string;
   private memoryManager?: MemoryManager;
   private syncMonitor?: AgentSyncMonitor;
-  private surfaceFixCooldowns = new Map<string, number>();
+  private surfaceFixState = new Map<string, { lastAttempt: number; attempts: number; errorSignature: string }>();
+  private pendingVerifications = new Map<string, { errorSignature: string; timer: NodeJS.Timeout }>();
   private objectsWatcher?: vscode.FileSystemWatcher;
   private objectsBroadcastTimer?: NodeJS.Timeout;
   private memoryChangeUnsubscribe?: () => void;
@@ -184,6 +120,14 @@ export class Orchestrator {
   private uiEventsSaveTimers = new Map<string, NodeJS.Timeout>();
   private foregroundReady = false;
   private pendingSidebarSync = false;
+  private routingMode: RoutingMode = 'dual';
+  private baseRouting: ObotovsSettings['routing'] | null = null;
+  private onFileChanged?: (filePath: string) => void;
+  private onSessionCleared?: () => void;
+
+  private setContext(key: string, value: boolean): void {
+    vscode.commands.executeCommand('setContext', key, value);
+  }
 
   constructor(
     sidebar: SidebarProvider,
@@ -226,6 +170,11 @@ export class Orchestrator {
       isAutoOpenEnabled: () => this.settings.surfacesAutoOpen,
       getRoutesUrl: () => this.routeManager.baseUrl(),
       onSurfaceError: (error) => this.handleSurfaceAutoFix(error),
+      onSurfaceClosed: (name) => {
+        this.surfaceFixState.delete(name);
+        const v = this.pendingVerifications.get(name);
+        if (v) { clearTimeout(v.timer); this.pendingVerifications.delete(name); }
+      },
       onSubmitToAgent: (text, agentId) => {
         const target = agentId || 'foreground';
         this.submitToAgent(target, text);
@@ -235,15 +184,15 @@ export class Orchestrator {
         }
       },
       onExecuteTool: async (tool, kwargs) => {
-        // Route tool execution through the foreground agent's tool tree
         const agent = this.manager.getForeground();
         if (!agent) throw new Error('No foreground agent available to execute tools');
-        const toolObj = agent.tools.getTool(tool);
-        if (!toolObj) throw new Error(`Tool not found: ${tool}`);
-        return await toolObj.handler(kwargs);
+        return await agent.getRouter().execute(tool, kwargs);
       },
     });
     this.skillManager = new SkillManager();
+    this.projectManager = new ProjectManager({
+      onProjectChanged: () => this.scheduleObjectsBroadcast(),
+    });
     this.dispatches = new DispatchRegistry();
     this.peerAsks = new PeerAskRegistry();
     this.peerManager = new PeerManager(
@@ -295,6 +244,7 @@ export class Orchestrator {
       toolTreeFactory: (agentId) => this.buildToolTreeFor(agentId),
       bridge: this.bridge,
       skills: this.skillManager,
+      projects: this.projectManager,
       onSummariesChanged: () => {
         this.peerManager.notifyLocalAgentsChanged();
         this.scheduleObjectsBroadcast();
@@ -432,7 +382,7 @@ export class Orchestrator {
       defaultChoice: req.defaultChoice,
       inputMode: req.inputMode,
     });
-    const displayQuestion = `[from peer ${rec.fromWindowId.slice(0, 8)}]\n\n${rec.question}`;
+    const displayQuestion = peerDispatchQuestion(rec.fromWindowId, rec.question);
     // Append a `question` event to the foreground slice using the rpcId as
     // the promptId. When the user answers via QuestionPrompt, the resulting
     // `ask_question_response` will be routed to the peer-ask registry
@@ -608,6 +558,10 @@ export class Orchestrator {
     }
 
     await this.createForeground();
+    this.setContext('obotovs.agentReady', true);
+    this.setContext('obotovs.hasSession', true);
+
+    this.projectManager.ensureProject();
 
     // Start peer presence last so `listAll()` picks up the foreground agent
     // in the initial hello broadcast.
@@ -625,6 +579,26 @@ export class Orchestrator {
       this.manager.updateSettings(newSettings);
     }
     await this.manager.recreateForeground(this.settings);
+  }
+
+  private applyRoutingModeOverrides(settings: ObotovsSettings): ObotovsSettings {
+    switch (this.routingMode) {
+      case 'local-only': {
+        const triageRoute = this.baseRouting?.triage ?? settings.routing.triage ?? settings.routing.executor;
+        return {
+          ...settings,
+          routing: { ...settings.routing, executor: triageRoute, triage: triageRoute },
+          triageEnabled: true,
+        };
+      }
+      case 'remote-only':
+        return { ...settings, triageEnabled: false };
+      case 'dual': {
+        const routing = this.baseRouting ?? settings.routing;
+        this.baseRouting = null;
+        return { ...settings, routing, triageEnabled: true };
+      }
+    }
   }
 
   getSession(): Session | undefined {
@@ -672,7 +646,7 @@ export class Orchestrator {
       throw new Error(`Agent "${targetId}" not found or not available.`);
     }
 
-    const formattedMessage = `[Message from ${callerLabel}]: ${message}`;
+    const formattedMessage = interAgentMessage(callerLabel, message);
 
     // Record pre-submission event count so we can collect the response later
     const slice = this.bridge.getSlice(targetId);
@@ -691,14 +665,14 @@ export class Orchestrator {
       targetHost.submit(formattedMessage).catch((err) => {
         logger.warn(`async inter-agent message delivery failed: ${err}`);
       });
-      return `[SENT] Message delivered to ${targetId}. The target agent will process it asynchronously.`;
+      return interAgentSentConfirmation(targetId);
     }
 
     // Synchronous: wait for the target to finish responding
     const responsePromise = new Promise<string>((resolve) => {
       const timeout = setTimeout(() => {
         unsub();
-        resolve('[TIMEOUT] Target agent did not respond within 120 seconds.');
+        resolve(INTER_AGENT_TIMEOUT);
       }, 120_000);
 
       const unsub = targetHost.on((event) => {
@@ -708,7 +682,7 @@ export class Orchestrator {
           // Collect assistant response events added after our message
           const currentSlice = this.bridge.getSlice(targetId);
           if (!currentSlice) {
-            resolve('[ERROR] Target agent slice not found.');
+            resolve(INTER_AGENT_SLICE_NOT_FOUND);
             return;
           }
           const newEvents = currentSlice.events.slice(preCount + 1); // +1 to skip the UserEvent we added
@@ -719,7 +693,7 @@ export class Orchestrator {
           if (assistantTexts.length > 0) {
             resolve(assistantTexts.join('\n'));
           } else {
-            resolve('[INFO] Target agent processed the message but produced no text response.');
+            resolve(INTER_AGENT_NO_TEXT_RESPONSE);
           }
         }
       });
@@ -748,11 +722,16 @@ export class Orchestrator {
     }
     this.uiEventsSaveTimers.clear();
 
+    for (const v of this.pendingVerifications.values()) clearTimeout(v.timer);
+    this.pendingVerifications.clear();
+    this.surfaceFixState.clear();
+
     this.speechToText?.dispose();
     void this.peerManager.stop();
     void this.routeManager.stop();
     this.surfaceManager.dispose();
     this.skillManager.dispose();
+    this.projectManager.dispose();
     this.dispatches.dispose();
     this.peerAsks.dispose();
     void this.manager.dispose();
@@ -780,12 +759,26 @@ export class Orchestrator {
     this.panelRevealer = revealer;
   }
 
+  setFileChangedCallback(cb: (filePath: string) => void): void {
+    this.onFileChanged = cb;
+  }
+
+  setSessionClearedCallback(cb: () => void): void {
+    this.onSessionCleared = cb;
+  }
+
   getAgentSummaries(): import('../shared/message-types').AgentSummary[] {
     return this.manager.listAll();
   }
 
   async cancelAgent(agentId: string): Promise<void> {
     await this.manager.cancel(agentId, 'Cancelled from explorer');
+  }
+
+  interrupt(): void {
+    getUserPromptBridge().cancelAll();
+    const host = this.manager.getForeground();
+    if (host) void host.interrupt();
   }
 
   onSummariesChanged(cb: () => void): void {
@@ -816,27 +809,29 @@ export class Orchestrator {
       agentRuntime: this.agentRuntime,
       initialSession: session,
       skills: this.skillManager,
+      projects: this.projectManager,
     });
 
 
     this.manager.registerInteractive(panelId, host);
 
-    // Spawn the subconscious observer!
-    const observerTask = "You are the subconscious observer. Loop system/observe. Update memory and warn the foreground agent if they make a mistake.";
-    this.manager.spawn({
-      task: observerTask,
-      label: 'Subconscious',
-      role: 'summarizer',
-      parentId: host.id
-    }).then(spawnRes => {
-      if (spawnRes.ok) {
-        host.on((event) => {
-          if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
-            pushSubconsciousEvent(spawnRes.agentId, event);
-          }
-        });
-      }
-    });
+    if (this.settings.subconsciousEnabled) {
+      const observerTask = SUBCONSCIOUS_OBSERVER_TASK;
+      this.manager.spawn({
+        task: observerTask,
+        label: 'Subconscious',
+        role: 'summarizer',
+        parentId: host.id
+      }).then(spawnRes => {
+        if (spawnRes.ok) {
+          host.on((event) => {
+            if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
+              pushSubconsciousEvent(spawnRes.agentId, event);
+            }
+          });
+        }
+      });
+    }
 
     await host.initialize(session);
 
@@ -929,27 +924,29 @@ export class Orchestrator {
       agentRuntime: this.agentRuntime,
       initialSession: session,
       skills: this.skillManager,
+      projects: this.projectManager,
     });
 
 
     this.manager.registerForeground(host);
 
-    // Spawn the subconscious observer for foreground!
-    const observerTask = "You are the subconscious observer. Loop system/observe. Update memory and warn the foreground agent if they make a mistake.";
-    this.manager.spawn({
-      task: observerTask,
-      label: 'Subconscious',
-      role: 'summarizer',
-      parentId: FOREGROUND_AGENT_ID
-    }).then(spawnRes => {
-      if (spawnRes.ok) {
-        host.on((event) => {
-          if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
-            pushSubconsciousEvent(spawnRes.agentId, event);
-          }
-        });
-      }
-    });
+    if (this.settings.subconsciousEnabled) {
+      const observerTask = SUBCONSCIOUS_OBSERVER_TASK;
+      this.manager.spawn({
+        task: observerTask,
+        label: 'Subconscious',
+        role: 'summarizer',
+        parentId: FOREGROUND_AGENT_ID
+      }).then(spawnRes => {
+        if (spawnRes.ok) {
+          host.on((event) => {
+            if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_complete' || event.type === 'token') {
+              pushSubconsciousEvent(spawnRes.agentId, event);
+            }
+          });
+        }
+      });
+    }
 
     await host.initialize(session);
 
@@ -974,9 +971,15 @@ export class Orchestrator {
       this.replaySidebarSync();
     }
 
-    // Persist foreground session + conversation memory on turn_complete
+    // Persist foreground session + conversation memory on turn_complete,
+    // and update context keys for keybinding when-clauses.
     host.on((event) => {
+      if (event.type === 'phase') {
+        const processing = event.phase !== 'idle' && event.phase !== 'complete' && event.phase !== 'error';
+        this.setContext('obotovs.isProcessing', processing);
+      }
       if (event.type === 'turn_complete') {
+        this.setContext('obotovs.isProcessing', false);
         const s = host.getSession();
         if (s) this.sessionStore.scheduleSave(s);
         if (this.memoryManager) {
@@ -1029,12 +1032,30 @@ export class Orchestrator {
   private attachSyncCapture(agentId: string, host: AgentHost): void {
     if (!this.syncMonitor) return;
     const monitor = this.syncMonitor;
+    let pendingText = '';
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    const DEBOUNCE_MS = 2000;
+
     host.on((event) => {
       if (event.type === 'tool_complete' && !event.error) {
         const text = (event.result ?? '').trim();
-        if (text) monitor.ingestContent(agentId, text);
+        if (!text) return;
+        // Accumulate text and debounce the expensive embedding call
+        pendingText += (pendingText ? '\n' : '') + text.slice(0, 500);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const batch = pendingText;
+          pendingText = '';
+          debounceTimer = undefined;
+          if (batch) monitor.ingestContent(agentId, batch);
+        }, DEBOUNCE_MS);
       }
       if (event.type === 'disposed') {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        if (pendingText) {
+          monitor.ingestContent(agentId, pendingText);
+          pendingText = '';
+        }
         monitor.unregisterAgent(agentId);
       }
     });
@@ -1141,6 +1162,37 @@ export class Orchestrator {
       },
     };
 
+    const codeMap = new CodeMap();
+
+    const planPropose = {
+      bridge,
+      post,
+      appendEvent: (event: any) => this.bridge.appendEvent(agentId, event),
+      patchEvent: (promptId: string, patch: Record<string, unknown>) => {
+        this.bridge.patchEvent(
+          agentId,
+          (e) => e.role === 'plan_approval' && (e as any).promptId === promptId,
+          patch as any,
+        );
+      },
+      getWorkspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      openMarkdownPreview: async (filePath: string) => {
+        const uri = vscode.Uri.file(filePath);
+        await vscode.commands.executeCommand('markdown.showPreview', uri);
+      },
+      writeFile: async (filePath: string, content: string) => {
+        const uri = vscode.Uri.file(filePath);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+      },
+      mkdirp: async (dirPath: string) => {
+        const uri = vscode.Uri.file(dirPath);
+        await vscode.workspace.fs.createDirectory(uri);
+      },
+      setApprovalMode: (mode: 'auto' | 'manual') => {
+        this.bridge.setPlanApprovalMode(agentId, mode);
+      },
+    };
+
     return buildToolTree({
       ask,
       secret,
@@ -1162,6 +1214,10 @@ export class Orchestrator {
       tts: {
         getApiKey: () => process.env.ELEVENLABS_API_KEY,
       },
+      codeMap: { getMap: () => codeMap },
+      project: { manager: this.projectManager },
+      planPropose,
+      onFileChanged: this.onFileChanged,
     });
   }
 
@@ -1215,12 +1271,12 @@ export class Orchestrator {
             this.bridge.appendEvent(agentId, {
               id: `assistant-${Date.now()}`,
               role: 'assistant',
-              content: `Dispatching task to ${agentsToSpawn.length} agent${agentsToSpawn.length === 1 ? '' : 's'}:\n\n${agentsToSpawn.map(a => `- **${a}**`).join('\n')}`,
+              content: dispatchConfirmation(agentsToSpawn),
               timestamp: now()
             });
 
             // Spawn background agents concurrently
-            const PROMPT_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer'] as const;
+            const PROMPT_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer', 'coder'] as const;
             for (const label of agentsToSpawn) {
               const spawnOpts: any = { task, label };
               const lower = label.toLowerCase();
@@ -1264,9 +1320,7 @@ export class Orchestrator {
             this.bridge.appendEvent(agentId, {
               id: `sys-${Date.now()}`,
               role: 'system',
-              content: isPlan
-                ? 'Main agent is busy. Spawning a planner agent to handle this concurrently.'
-                : 'Main agent is busy. Spawning a local background agent to handle this question concurrently.',
+              content: isPlan ? WORKING_ON_PLAN : LOOKING_INTO_THAT,
               timestamp: now(),
             });
             this.manager.spawn({
@@ -1287,7 +1341,7 @@ export class Orchestrator {
           this.bridge.appendEvent(agentId, {
             id: `sys-${Date.now()}`,
             role: 'system',
-            content: 'Agent is still initializing. Please wait a moment and try again.',
+            content: AGENT_INITIALIZING,
             timestamp: now(),
           });
         }
@@ -1392,6 +1446,19 @@ export class Orchestrator {
         break;
       }
 
+      case 'plan_approval_response': {
+        const pBridge = getUserPromptBridge();
+        if (msg.denied) {
+          pBridge.resolvePlanApproval(msg.promptId, { denied: true });
+        } else {
+          pBridge.resolvePlanApproval(msg.promptId, {
+            denied: false,
+            approvalMode: msg.approvalMode,
+          });
+        }
+        break;
+      }
+
       case 'request_provider_models': {
         const { getProviderModels } = await import('../config/model-listing');
         const providerList = await getProviderModels(this.settings);
@@ -1400,19 +1467,45 @@ export class Orchestrator {
       }
 
       case 'change_model': {
+        const role = msg.role ?? 'executor';
         const newSettings: ObotovsSettings = {
           ...this.settings,
           routing: {
             ...this.settings.routing,
-            executor: { providerId: msg.provider, model: msg.model },
+            [role]: { providerId: msg.provider, model: msg.model },
           },
         };
+        if (this.routingMode === 'local-only') {
+          const mirrored = { providerId: msg.provider, model: msg.model };
+          newSettings.routing = { ...newSettings.routing, triage: mirrored, executor: mirrored };
+        }
         this.settings = newSettings;
+        if (this.baseRouting) {
+          this.baseRouting = { ...this.baseRouting, [role]: { providerId: msg.provider, model: msg.model } };
+        }
         const changeTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
         if (changeTarget === FOREGROUND_AGENT_ID) {
           await this.recreateAgent();
         } else {
           const rec = this.manager.get(changeTarget);
+          if (rec?.host) await rec.host.recreate(newSettings);
+        }
+        break;
+      }
+
+      case 'change_routing_mode': {
+        this.routingMode = msg.mode;
+        if (!this.baseRouting && msg.mode !== 'dual') {
+          this.baseRouting = { ...this.settings.routing };
+        }
+        const newSettings = this.applyRoutingModeOverrides({ ...this.settings });
+        this.settings = newSettings;
+        const routingTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
+        this.bridge.setRoutingMode(routingTarget, msg.mode);
+        if (routingTarget === FOREGROUND_AGENT_ID) {
+          await this.recreateAgent();
+        } else {
+          const rec = this.manager.get(routingTarget);
           if (rec?.host) await rec.host.recreate(newSettings);
         }
         break;
@@ -1441,10 +1534,22 @@ export class Orchestrator {
         getUserPromptBridge().cancelAll();
         this.bridge.clearSlice(clearId);
         if (clearId === FOREGROUND_AGENT_ID) {
-          await this.recreateAgent();
+          this.setContext('obotovs.hasSession', false);
+          this.onSessionCleared?.();
+          const fgRec = this.manager.get(FOREGROUND_AGENT_ID);
+          if (fgRec?.host) await fgRec.host.recreateClean(this.settings);
+          const s = fgRec?.host.getSession();
+          if (s) await this.sessionStore.save(s);
+          await this.sessionStore.saveUiEvents([]);
+          this.setContext('obotovs.hasSession', true);
         } else {
           const rec = this.manager.get(clearId);
-          if (rec?.host) await rec.host.recreate(this.settings);
+          if (rec?.host) {
+            await rec.host.recreateClean(this.settings);
+            const s = rec.host.getSession();
+            if (s) await this.sessionStore.savePanel(clearId, s);
+            await this.sessionStore.savePanelUiEvents(clearId, []);
+          }
         }
         break;
       }
@@ -1456,6 +1561,7 @@ export class Orchestrator {
         const idx = slice.events.findIndex((e: SessionEvent) => e.id === msg.eventId);
         if (idx !== -1) {
           slice.events = slice.events.slice(0, idx + 1);
+          this.scheduleUiEventsSave(agentId);
         }
         break;
       }
@@ -1465,6 +1571,7 @@ export class Orchestrator {
         const slice = this.bridge.getSlice(agentId);
         if (!slice) break;
         slice.events = slice.events.filter((e: SessionEvent) => e.id !== msg.eventId);
+        this.scheduleUiEventsSave(agentId);
         break;
       }
 
@@ -1619,7 +1726,17 @@ export class Orchestrator {
       });
     }
 
-    return { surfaces, routes, skills, memories, conversations };
+    const projects: ProjectInfo[] = this.projectManager.list().map((p) => ({
+      id: p.id,
+      name: p.name,
+      type: p.type,
+      status: p.status,
+      activePlanCount: this.projectManager.listPlans(p.id).filter((pl) => pl.status === 'in-progress' || pl.status === 'approved').length,
+      taskCount: this.projectManager.listTasks(p.id).length,
+      filePath: root ? path.join(root, '.obotovs', 'projects', p.id, 'project.json') : '',
+    }));
+
+    return { surfaces, routes, skills, memories, conversations, projects };
   }
 
   private archivesCache: string[] = [];
@@ -1660,9 +1777,34 @@ export class Orchestrator {
           return this.handleMemoryAction(action, id, agentId);
         case 'conversation':
           return this.handleConversationAction(action, id);
+        case 'project':
+          return this.handleProjectAction(action, id);
       }
     } catch (err) {
       logger.warn(`[objects] ${category} ${action} failed for "${id}"`, err);
+    }
+  }
+
+  private async handleProjectAction(action: ObjectActionKind, id: string): Promise<void> {
+    const project = this.projectManager.get(id);
+    if (!project) return;
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return;
+    const filePath = path.join(root, '.obotovs', 'projects', id, 'project.json');
+    const uri = vscode.Uri.file(filePath);
+
+    if (action === 'open') {
+      await vscode.commands.executeCommand('vscode.open', uri);
+    } else if (action === 'delete') {
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete project "${project.name}"?`, { modal: true }, 'Delete',
+      );
+      if (confirm === 'Delete') {
+        const projectDir = path.join(root, '.obotovs', 'projects', id);
+        await vscode.workspace.fs.delete(vscode.Uri.file(projectDir), { recursive: true, useTrash: true });
+      }
+    } else if (action === 'reveal') {
+      await vscode.commands.executeCommand('revealInExplorer', uri);
     }
   }
 
@@ -1684,13 +1826,58 @@ export class Orchestrator {
   }
 
   private handleSurfaceAutoFix(error: SurfaceError): void {
-    const COOLDOWN_MS = 30_000;
-    const lastAttempt = this.surfaceFixCooldowns.get(error.name) ?? 0;
-    if (Date.now() - lastAttempt < COOLDOWN_MS) {
-      logger.info(`[surfaces] Skipping auto-fix for "${error.name}" — cooldown active`);
+    const MAX_ATTEMPTS = 5;
+    const BASE_COOLDOWN_MS = 10_000;
+    const MAX_COOLDOWN_MS = 300_000;
+    const VERIFY_WINDOW_MS = 15_000;
+
+    const sig = error.message.slice(0, 100);
+
+    // Check for active verification — did a previous fix fail?
+    const verification = this.pendingVerifications.get(error.name);
+    if (verification) {
+      clearTimeout(verification.timer);
+      this.pendingVerifications.delete(error.name);
+      if (sig === verification.errorSignature) {
+        logger.warn(`[surfaces] Auto-fix for "${error.name}" failed — same error recurred`);
+        this.bridge.appendEvent(FOREGROUND_AGENT_ID, {
+          id: `system-surface-fixfail-${Date.now()}`,
+          role: 'system',
+          content: `Auto-fix for surface "${error.name}" did not resolve the error. Will retry with backoff.`,
+          timestamp: now(),
+        });
+        return;
+      }
+    }
+
+    const state = this.surfaceFixState.get(error.name) ?? { lastAttempt: 0, attempts: 0, errorSignature: sig };
+
+    // Different error — reset attempt counter
+    if (state.errorSignature !== sig) {
+      state.attempts = 0;
+      state.errorSignature = sig;
+    }
+
+    if (state.attempts >= MAX_ATTEMPTS) {
+      logger.warn(`[surfaces] Auto-fix for "${error.name}" exhausted ${MAX_ATTEMPTS} attempts — giving up`);
+      this.bridge.appendEvent(FOREGROUND_AGENT_ID, {
+        id: `system-surface-giveup-${Date.now()}`,
+        role: 'system',
+        content: `Surface "${error.name}" keeps failing after ${MAX_ATTEMPTS} auto-fix attempts. Manual intervention needed.`,
+        timestamp: now(),
+      });
       return;
     }
-    this.surfaceFixCooldowns.set(error.name, Date.now());
+
+    const cooldown = Math.min(BASE_COOLDOWN_MS * Math.pow(2, state.attempts), MAX_COOLDOWN_MS);
+    if (Date.now() - state.lastAttempt < cooldown) {
+      logger.info(`[surfaces] Skipping auto-fix for "${error.name}" — cooldown ${Math.round(cooldown / 1000)}s active (attempt ${state.attempts + 1})`);
+      return;
+    }
+
+    state.attempts++;
+    state.lastAttempt = Date.now();
+    this.surfaceFixState.set(error.name, state);
 
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return;
@@ -1710,27 +1897,30 @@ export class Orchestrator {
       error.lineno ? `Line: ${error.lineno}, Col: ${error.colno ?? '?'}` : '',
     ].filter(Boolean).join('\n');
 
-    const prompt =
-      `The surface "${error.name}" threw a runtime JavaScript error in its webview panel.\n\n` +
-      `${errorDetail}\n\n` +
-      `Here is the full source of the surface:\n\n` +
-      `\`\`\`html\n${source}\n\`\`\`\n\n` +
-      `Fix the error by calling the surface/update tool with the corrected HTML. ` +
-      `Only fix the bug — do not change the surface's behavior or appearance otherwise.`;
+    const prompt = surfaceAutoFixPrompt(error.name, errorDetail, source, error.consoleLogs, state.attempts);
 
     const host = this.manager.getForeground();
     if (!host) return;
 
-    logger.info(`[surfaces] Auto-fixing "${error.name}": ${error.message}`);
+    logger.info(`[surfaces] Auto-fixing "${error.name}" (attempt ${state.attempts}/${MAX_ATTEMPTS}): ${error.message}`);
 
     this.bridge.appendEvent(FOREGROUND_AGENT_ID, {
       id: `system-surface-fix-${Date.now()}`,
       role: 'system',
-      content: `Surface "${error.name}" crashed: ${error.message} — attempting auto-fix…`,
+      content: surfaceCrashedNotice(error.name, error.message),
       timestamp: now(),
     });
 
     void host.submit(prompt);
+
+    // Start verification timer — if no recurrence, the fix succeeded
+    const timer = setTimeout(() => {
+      this.pendingVerifications.delete(error.name);
+      this.surfaceFixState.delete(error.name);
+      logger.info(`[surfaces] Auto-fix for "${error.name}" appears successful`);
+    }, VERIFY_WINDOW_MS);
+
+    this.pendingVerifications.set(error.name, { errorSignature: sig, timer });
   }
 
   private async handleRouteAction(action: ObjectActionKind, urlPath: string): Promise<void> {

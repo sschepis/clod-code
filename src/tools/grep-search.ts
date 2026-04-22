@@ -5,7 +5,7 @@ import * as path from 'path';
 export function createGrepSearchHandler() {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const pattern = String(kwargs.pattern || '');
-    if (!pattern) return '[ERROR] Missing required argument: pattern';
+    if (!pattern) return '[ERROR] Missing required argument: pattern. Provide a regex pattern to search for in file contents (e.g. "function\\s+handleClick", "TODO|FIXME", "import.*from"). Use type or glob to filter file types.';
 
     const searchPath = String(kwargs.path || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '.');
     const fileType = kwargs.type ? `--type ${kwargs.type}` : '';
@@ -38,15 +38,18 @@ export function createGrepSearchHandler() {
         cwd: searchPath,
       });
 
-      return output.trim() || `[INFO] No matches found for '${pattern}'.`;
+      return output.trim() || `[INFO] No matches found for '${pattern}'. Try: broader pattern, case_insensitive=true, or remove type/glob filters. Use search/glob to find files by name instead of content.`;
     } catch (err: any) {
       // Exit code 1 means no matches (not an error)
       if (err.status === 1) {
-        return `[INFO] No matches found for '${pattern}'.`;
+        return `[INFO] No matches found for '${pattern}'. Try: broader pattern, case_insensitive=true, or remove type/glob filters. Use search/glob to find files by name instead of content.`;
       }
-      // Exit code 2 means actual error
       const stderr = err.stderr?.toString() || '';
-      return `[ERROR] Grep search failed: ${stderr || (err instanceof Error ? err.message : String(err))}`;
+      const errMsg = stderr || (err instanceof Error ? err.message : String(err));
+      if (errMsg.includes('regex parse error') || errMsg.includes('Syntax')) {
+        return `[ERROR] Invalid regex pattern '${pattern}': ${errMsg}. Ripgrep uses Rust regex syntax — escape special characters like (, ), {, } with backslashes. For literal string search, escape regex metacharacters.`;
+      }
+      return `[ERROR] Grep search failed: ${errMsg}`;
     }
   };
 }

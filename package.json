@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "sschepis",
   "license": "MIT",
+  "galleryBanner": { "color": "#1a1a2e", "theme": "dark" },
+  "preview": true,
+  "badges": [
+    { "url": "https://img.shields.io/badge/license-MIT-green", "href": "https://github.com/sschepis/clodcode/blob/main/LICENSE", "description": "License" }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/sschepis/clodcode.git"
@@ -14,6 +19,7 @@
   },
   "categories": [
     "AI",
+    "Machine Learning",
     "Programming Languages",
     "Other"
   ],
@@ -84,6 +90,14 @@
         "title": "Oboto: Open Surface"
       },
       {
+        "command": "obotovs.project.init",
+        "title": "Oboto: Initialize Project"
+      },
+      {
+        "command": "obotovs.project.status",
+        "title": "Oboto: Project Status"
+      },
+      {
         "command": "obotovs.newChat",
         "title": "Oboto: New Chat Window",
         "icon": {
@@ -148,6 +162,32 @@
       {
         "command": "obotovs.explorer.focusTask",
         "title": "Focus in Chat"
+      },
+      {
+        "command": "obotovs.interrupt",
+        "title": "Oboto: Stop Agent"
+      },
+      {
+        "command": "obotovs.alephnet.openProfile",
+        "title": "AlephNet: Open Profile"
+      },
+      {
+        "command": "obotovs.alephnet.refresh",
+        "title": "AlephNet: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "obotovs.quickTask",
+        "title": "Oboto: Quick Task",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "obotovs.codeLensAsk",
+        "title": "Oboto: Ask About Symbol"
+      },
+      {
+        "command": "obotovs.codeLensExplain",
+        "title": "Oboto: Explain Symbol"
       }
     ],
     "menus": {
@@ -160,22 +200,22 @@
       "editor/context": [
         {
           "command": "obotovs.askAboutSelection",
-          "when": "editorHasSelection",
+          "when": "editorHasSelection && obotovs.agentReady",
           "group": "obotovs@1"
         },
         {
           "command": "obotovs.explainCode",
-          "when": "editorHasSelection",
+          "when": "editorHasSelection && obotovs.agentReady",
           "group": "obotovs@1"
         },
         {
           "command": "obotovs.refactorCode",
-          "when": "editorHasSelection",
+          "when": "editorHasSelection && obotovs.agentReady",
           "group": "obotovs@1"
         },
         {
           "command": "obotovs.writeTests",
-          "when": "editorHasSelection",
+          "when": "editorHasSelection && obotovs.agentReady",
           "group": "obotovs@1"
         }
       ],
@@ -239,7 +279,7 @@
         },
         {
           "command": "obotovs.clearSession",
-          "when": "view == obotovs.chatPanel",
+          "when": "view == obotovs.chatPanel && obotovs.hasSession",
           "group": "navigation@3"
         },
         {
@@ -266,6 +306,17 @@
         "key": "delete",
         "mac": "cmd+backspace",
         "when": "focusedView == obotovs.explorer && listFocus"
+      },
+      {
+        "command": "obotovs.interrupt",
+        "key": "escape",
+        "when": "obotovs.isProcessing"
+      },
+      {
+        "command": "obotovs.quickTask",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "obotovs.agentReady"
       }
     ],
     "configuration": {
@@ -321,13 +372,36 @@
           "type": "object",
           "default": {
             "triage": {
+        "obotovs.alephnet": {
+          "type": "object",
+          "default": {
+            "enabled": false,
+            "port": 31337,
+            "nodeId": ""
+          },
+          "description": "AlephNet node configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable AlephNet local node"
+            },
+            "port": {
+              "type": "number",
+              "description": "Port for local AlephNet server"
+            },
+            "nodeId": {
+              "type": "string",
+              "description": "Optional fixed node ID"
+            }
+          }
+        },
               "providerId": "oboto"
             },
             "executor": {
               "providerId": "oboto"
             }
           },
-          "markdownDescription": "Route task roles to specific providers and models.\n\n**Roles:**\n- `triage` — quick classification (fast, cheap model)\n- `executor` — main task execution (powerful model)\n- `planner` — planning and architecture (falls back to executor if unset)\n- `summarizer` — compaction and summarization (falls back to executor if unset)\n\n**Example:**\n```json\n{\n  \"triage\": { \"providerId\": \"oboto\" },\n  \"executor\": { \"providerId\": \"my-anthropic\", \"model\": \"claude-sonnet-4-20250514\" }\n}\n```\nUse `\"oboto\"` for the managed local Ollama provider, or a key from your `providers` map.",
+          "markdownDescription": "Route task roles to specific providers and models.\n\n**Roles:**\n- `triage` — quick classification (fast, cheap model)\n- `executor` — main task execution (powerful model)\n- `coder` — code generation, file edits, and coding tasks (falls back to executor if unset)\n- `planner` — planning and architecture (falls back to executor if unset)\n- `summarizer` — compaction and summarization (falls back to executor if unset)\n\n**Example:**\n```json\n{\n  \"triage\": { \"providerId\": \"oboto\" },\n  \"executor\": { \"providerId\": \"my-anthropic\", \"model\": \"claude-sonnet-4-20250514\" }\n}\n```\nUse `\"oboto\"` for the managed local Ollama provider, or a key from your `providers` map.",
           "properties": {
             "triage": {
               "type": "object",
@@ -374,6 +448,20 @@
               ]
             },
             "summarizer": {
+              "type": "object",
+              "properties": {
+                "providerId": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "providerId"
+              ]
+            },
+            "coder": {
               "type": "object",
               "properties": {
                 "providerId": {
@@ -472,6 +560,12 @@
           "default": true,
           "description": "Allow other Oboto VS windows on this workspace to send you dispatch/ask/cancel requests (each still requires your explicit approval in the UI). Turn off to ignore peer requests entirely."
         },
+        "obotovs.dismissedProviders": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Provider types the user has explicitly removed. Prevents auto-detect from re-adding them."
+        },
         "obotovs.shell": {
           "type": "string",
           "default": "",
@@ -538,6 +632,7 @@
     "postinstall": "node scripts/patch-oboto-agent.js"
   },
   "dependencies": {
+    "@sschepis/alephnet-node": "^1.4.0",
     "@aleph-ai/tinyaleph": "^1.7.3",
     "@anthropic-ai/sdk": "^0.30.1",
     "@google-cloud/vertexai": "^1.12.0",
@@ -547,7 +642,7 @@
     "@sschepis/llm-wrapper": "^0.1.8",
     "@sschepis/lmscript": "^0.1.3",
     "@sschepis/oboto-agent": "file:../oboto-agent",
-    "@sschepis/swiss-army-tool": "^0.1.2",
+    "@sschepis/swiss-army-tool": "^0.1.3",
     "@xenova/transformers": "^2.17.2",
     "openai": "^4.104.0",
     "web-tree-sitter": "^0.26.8",
@@ -571,7 +666,13 @@
     "llm",
     "chat",
     "agents",
-    "coding assistant"
+    "coding assistant",
+    "code assistant",
+    "multi-model",
+    "gemini",
+    "openai",
+    "ollama",
+    "anthropic"
   ],
   "bugs": {
     "url": "https://github.com/sschepis/obotovs/issues"

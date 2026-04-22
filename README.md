@@ -40,6 +40,7 @@ Oboto VS supports local and cloud LLM providers with a dual-model triage archite
 | **Surfaces** | create/update/delete AI-authored HTML panels |
 | **Routes** | Next.js-style API endpoints (GET/POST/PUT/DELETE/PATCH) |
 | **Skills** | Markdown playbooks discovered from `.obotovs/skills/` |
+| **Projects** | init, plan, task, review, status, archive |
 | **Agents** | spawn, query, list, cancel background agents |
 | **Memory** | add, recall, promote, list, forget across scopes |
 | **Peers** | list, dispatch tasks, ask questions across VS Code windows |
@@ -59,6 +60,27 @@ Tool outputs are auto-captured at low strength. The LLM promotes noteworthy entr
 
 - **Surfaces** — AI-authored HTML pages rendered in VS Code webview panels. Stored in `.obotovs/surfaces/`. Can use CDN libraries (React, Tailwind, etc.) and call local API routes.
 - **Routes** — Local API endpoints following Next.js App Router conventions. Stored in `.obotovs/routes/`. Supports dynamic segments (`[id]`), hot-reloads on file change.
+
+### Project Management
+
+Built-in project management that supports three modes:
+
+- **New builds** — Scaffold a project, plan features, track tasks, and review code
+- **Existing codebases** — Auto-detect conventions (tech stack, naming, test patterns, linting) and enforce them going forward
+- **Ad-hoc** — Lightweight task tracking without upfront planning
+
+Projects are stored in `.obotovs/projects/<name>/` with JSON files for plans, tasks, and reviews. Key capabilities:
+
+| Tool | Purpose |
+|------|---------|
+| `project/init` | Scaffold a new or existing project with convention scanning |
+| `project/plan` | Create detailed implementation plans (third-party executable) |
+| `project/task` | Track work items with audit trails |
+| `project/review` | Record code reviews with findings by severity |
+| `project/status` | Dashboard summary of plans, tasks, and reviews |
+| `project/archive` | Archive completed projects (preserves all data) |
+
+Active project conventions and plan progress are automatically injected into the agent's system prompt, ensuring consistent adherence to established patterns.
 
 ### Workspace Skills
 
@@ -160,6 +182,7 @@ src/
   config/
     settings.ts          # VS Code settings → typed config
     provider-registry.ts # LLM provider metadata
+  projects/              # Project management (plans, tasks, reviews, conventions)
   surfaces/              # AI-authored HTML panel manager
   routes/                # Local API endpoint manager
   skills/                # Workspace skill discovery
@@ -191,6 +214,8 @@ webview-ui/src/
 | New Session | — | Start a fresh conversation |
 | Switch Model | — | Change the active LLM |
 | Ask About Selection | Context menu | Ask the agent about selected code |
+| Initialize Project | — | Scaffold a new project via quick-pick |
+| Project Status | — | Show active project dashboard |
 | Open Settings | — | Open the settings panel |
 
 ## Testing
@@ -199,7 +224,7 @@ webview-ui/src/
 npm test
 ```
 
-Runs vitest suites for the memory system and sync monitor.
+Runs vitest suites for the memory system, sync monitor, and project management.
 
 ## License
 

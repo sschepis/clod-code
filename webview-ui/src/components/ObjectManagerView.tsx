@@ -2,11 +2,11 @@ import React, { useMemo, useState } from 'react';
 import {
   Bot, Loader2, Check, XCircle, AlertTriangle, X, Trash2,
   ChevronRight, ChevronDown, FolderTree, Layout, Route, Sparkles,
-  Brain, MessageSquare, FolderOpen, Eye,
+  Brain, MessageSquare, FolderOpen, Eye, Kanban,
 } from 'lucide-react';
 import type {
   AgentSummary, ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo,
-  MemoryInfo, ConversationInfo, ObjectCategory, ObjectActionKind,
+  MemoryInfo, ConversationInfo, ProjectInfo, ObjectCategory, ObjectActionKind,
 } from '../../../src/shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../../../src/shared/message-types';
 
@@ -30,8 +30,8 @@ export const ObjectManagerView: React.FC<ObjectManagerViewProps> = ({
   const background = agents.filter((a) => a.id !== FOREGROUND_AGENT_ID);
 
   return (
-    <div className="flex flex-col h-full bg-[#121214] text-zinc-200 overflow-y-auto">
-      <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-[#121214] z-10 border-b border-zinc-900">
+    <div className="flex flex-col h-full bg-vscode-editorBg text-vscode-editorFg overflow-y-auto">
+      <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-vscode-editorBg z-10 border-b border-zinc-900">
         <h2 className="text-sm font-semibold tracking-wide flex items-center gap-2">
           <FolderTree size={16} className="text-indigo-400" />
           Object Manager
@@ -39,6 +39,20 @@ export const ObjectManagerView: React.FC<ObjectManagerViewProps> = ({
       </div>
 
       <div className="flex flex-col">
+        <Section
+          title="Projects"
+          icon={<Kanban size={14} className="text-violet-400" />}
+          count={objects.projects?.length ?? 0}
+        >
+          {!objects.projects || objects.projects.length === 0 ? (
+            <Empty>No projects. Use <code>project/init</code> to create one.</Empty>
+          ) : (
+            objects.projects.map((p) => (
+              <ProjectRow key={p.id} project={p} onAction={onObjectAction} />
+            ))
+          )}
+        </Section>
+
         <Section
           title="Surfaces"
           icon={<Layout size={14} className="text-sky-400" />}
@@ -137,12 +151,12 @@ const Section: React.FC<{
     <div className="border-b border-zinc-900">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/50 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-vscode-widgetBg/50 transition-colors"
       >
-        {open ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
+        {open ? <ChevronDown size={12} className="text-vscode-desc" /> : <ChevronRight size={12} className="text-vscode-desc" />}
         {icon}
-        <span className="text-xs font-semibold tracking-wide uppercase text-zinc-300">{title}</span>
-        <span className="ml-auto text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-900">
+        <span className="text-xs font-semibold tracking-wide uppercase text-vscode-editorFg">{title}</span>
+        <span className="ml-auto text-[10px] font-mono text-vscode-desc px-1.5 py-0.5 rounded bg-vscode-widgetBg">
           {count}
         </span>
       </button>
@@ -152,7 +166,7 @@ const Section: React.FC<{
 };
 
 const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="px-8 py-3 text-[11px] text-zinc-600 italic">{children}</div>
+  <div className="px-8 py-3 text-[11px] text-vscode-disabled italic">{children}</div>
 );
 
 const RowActions: React.FC<{
@@ -165,7 +179,7 @@ const RowActions: React.FC<{
     {onOpen && (
       <button
         onClick={(e) => { e.stopPropagation(); onOpen(); }}
-        className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+        className="p-1 rounded hover:bg-vscode-inputBg text-vscode-desc hover:text-vscode-editorFg"
         title="Open"
       >
         <FolderOpen size={12} />
@@ -174,7 +188,7 @@ const RowActions: React.FC<{
     {onReveal && (
       <button
         onClick={(e) => { e.stopPropagation(); onReveal(); }}
-        className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+        className="p-1 rounded hover:bg-vscode-inputBg text-vscode-desc hover:text-vscode-editorFg"
         title="Reveal in Explorer"
       >
         <Eye size={12} />
@@ -183,7 +197,7 @@ const RowActions: React.FC<{
     {onDelete && (
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-400"
+        className="p-1 rounded hover:bg-vscode-inputBg text-vscode-desc hover:text-red-400"
         title={deleteTitle}
       >
         <Trash2 size={12} />
@@ -201,18 +215,53 @@ const LeafRow: React.FC<{
 }> = ({ label, subtitle, indent = 1, onClick, actions }) => (
   <div
     onClick={onClick}
-    className={`group flex items-center gap-2 pr-3 py-1 text-xs hover:bg-zinc-900/60 ${onClick ? 'cursor-pointer' : ''}`}
+    className={`group flex items-center gap-2 pr-3 py-1 text-xs hover:bg-vscode-widgetBg/60 ${onClick ? 'cursor-pointer' : ''}`}
     style={{ paddingLeft: `${12 + indent * 16}px` }}
   >
     <div className="min-w-0 flex-1 truncate">
-      <div className="text-zinc-300 truncate">{label}</div>
-      {subtitle && <div className="text-[10px] text-zinc-600 truncate">{subtitle}</div>}
+      <div className="text-vscode-editorFg truncate">{label}</div>
+      {subtitle && <div className="text-[10px] text-vscode-disabled truncate">{subtitle}</div>}
     </div>
     {actions}
   </div>
 );
 
 // ── Surface ─────────────────────────────────────────────────────────
+
+// ── Project row ─────────────────────────────────────────────────────
+
+const statusColors: Record<string, string> = {
+  active: 'text-green-400',
+  draft: 'text-zinc-400',
+  paused: 'text-yellow-400',
+  completed: 'text-blue-400',
+  archived: 'text-zinc-500',
+};
+
+const ProjectRow: React.FC<{
+  project: ProjectInfo;
+  onAction: ObjectManagerViewProps['onObjectAction'];
+}> = ({ project, onAction }) => (
+  <LeafRow
+    label={project.name}
+    subtitle={`${project.type} · ${project.activePlanCount} plan(s) · ${project.taskCount} task(s)`}
+    onClick={() => onAction('project', 'open', project.id)}
+    actions={
+      <>
+        <span className={`text-[10px] font-mono ${statusColors[project.status] ?? 'text-zinc-400'}`}>
+          {project.status}
+        </span>
+        <RowActions
+          onOpen={() => onAction('project', 'open', project.id)}
+          onReveal={() => onAction('project', 'reveal', project.id)}
+          onDelete={() => onAction('project', 'delete', project.id)}
+        />
+      </>
+    }
+  />
+);
+
+// ── Surface row ─────────────────────────────────────────────────────
 
 const SurfaceRow: React.FC<{
   surface: SurfaceInfo;
@@ -297,13 +346,13 @@ const RouteTreeNode: React.FC<{
     <>
       <div
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-zinc-900/60 cursor-pointer"
+        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-vscode-widgetBg/60 cursor-pointer"
         style={{ paddingLeft: `${12 + indent * 16}px` }}
       >
-        {open ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
-        <span className="font-mono text-zinc-400">{node.name}/</span>
+        {open ? <ChevronDown size={10} className="text-vscode-disabled" /> : <ChevronRight size={10} className="text-vscode-disabled" />}
+        <span className="font-mono text-vscode-desc">{node.name}/</span>
         {hasRoute && (
-          <span className="ml-2 text-[10px] text-zinc-600">({node.route!.urlPath})</span>
+          <span className="ml-2 text-[10px] text-vscode-disabled">({node.route!.urlPath})</span>
         )}
       </div>
       {open && [...node.children.values()].map((c) => (
@@ -361,11 +410,11 @@ const SkillGroup: React.FC<{
     <>
       <div
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-zinc-900/60 cursor-pointer"
+        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-vscode-widgetBg/60 cursor-pointer"
         style={{ paddingLeft: '28px' }}
       >
-        {open ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
-        <span className="font-mono text-zinc-400">{name}/</span>
+        {open ? <ChevronDown size={10} className="text-vscode-disabled" /> : <ChevronRight size={10} className="text-vscode-disabled" />}
+        <span className="font-mono text-vscode-desc">{name}/</span>
       </div>
       {open && skills.map((s) => (
         <SkillRow key={s.name} skill={s} indent={2} onAction={onAction} stripPrefix={`${name}/`} />
@@ -413,9 +462,9 @@ const AgentRow: React.FC<{
       case 'running':  return <Loader2 size={12} className="animate-spin text-amber-400" />;
       case 'complete': return <Check size={12} className="text-emerald-400" />;
       case 'error':    return <AlertTriangle size={12} className="text-red-400" />;
-      case 'cancelled':return <XCircle size={12} className="text-zinc-500" />;
+      case 'cancelled':return <XCircle size={12} className="text-vscode-desc" />;
       case 'idle':
-      default:         return <Bot size={12} className="text-zinc-500" />;
+      default:         return <Bot size={12} className="text-vscode-desc" />;
     }
   })();
 
@@ -423,21 +472,21 @@ const AgentRow: React.FC<{
     <div
       onClick={() => onFocus(agent.id)}
       className={`group flex items-center gap-2 pr-3 py-1 text-xs cursor-pointer ${
-        focused ? 'bg-indigo-500/10' : 'hover:bg-zinc-900/60'
+        focused ? 'bg-indigo-500/10' : 'hover:bg-vscode-widgetBg/60'
       }`}
       style={{ paddingLeft: '28px' }}
     >
       {StatusIcon}
       <div className="min-w-0 flex-1 truncate">
-        <div className="text-zinc-300 truncate">{agent.label}</div>
-        <div className="text-[10px] text-zinc-600 truncate">
+        <div className="text-vscode-editorFg truncate">{agent.label}</div>
+        <div className="text-[10px] text-vscode-disabled truncate">
           {agent.status} · ${agent.cost.totalCost.toFixed(4)}
         </div>
       </div>
       {agent.status === 'running' && (
         <button
           onClick={(e) => { e.stopPropagation(); onCancel(agent.id); }}
-          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-800 text-zinc-400 hover:text-red-400"
+          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-vscode-inputBg text-vscode-desc hover:text-red-400"
           title="Cancel agent"
         >
           <X size={12} />
@@ -506,12 +555,12 @@ const MemorySubgroup: React.FC<{
     <>
       <div
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-zinc-900/60 cursor-pointer"
+        className="flex items-center gap-1 pr-3 py-1 text-xs hover:bg-vscode-widgetBg/60 cursor-pointer"
         style={{ paddingLeft: '28px' }}
       >
-        {open ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
-        <span className="text-zinc-400">{name}</span>
-        <span className="ml-auto text-[10px] font-mono text-zinc-600">{items.length}</span>
+        {open ? <ChevronDown size={10} className="text-vscode-disabled" /> : <ChevronRight size={10} className="text-vscode-disabled" />}
+        <span className="text-vscode-desc">{name}</span>
+        <span className="ml-auto text-[10px] font-mono text-vscode-disabled">{items.length}</span>
       </div>
       {open && items.map((m) => (
         <LeafRow

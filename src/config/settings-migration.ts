@@ -116,6 +116,7 @@ export async function migrateSettingsIfNeeded(): Promise<void> {
 export async function autoDetectProviders(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration(EXTENSION_ID);
   const existing = cfg.get<Record<string, ProviderConfig>>('providers', {});
+  const dismissed = new Set(cfg.get<string[]>('dismissedProviders', []));
 
   const existingTypes = new Set(Object.values(existing).map(p => p.type));
 
@@ -125,6 +126,7 @@ export async function autoDetectProviders(): Promise<void> {
     if (!envVar || !process.env[envVar]) continue;
     if (providerType === 'ollama' || providerType === 'lmstudio') continue;
     if (existingTypes.has(providerType)) continue;
+    if (dismissed.has(providerType)) continue;
 
     const meta = PROVIDERS[providerType];
     if (!meta) continue;

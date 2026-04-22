@@ -15,11 +15,11 @@ export const PeerDispatchPrompt: React.FC<PeerDispatchPromptProps> = ({
 }) => {
   if (status === 'approved') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
           <Check size={14} className="text-emerald-400" />
-          <span className="text-zinc-400">Peer dispatch approved — agent spawned for</span>
-          <span className="text-zinc-200 truncate">{label}</span>
+          <span className="text-vscode-desc">Peer dispatch approved — agent spawned for</span>
+          <span className="text-vscode-editorFg truncate">{label}</span>
         </div>
       </div>
     );
@@ -27,10 +27,10 @@ export const PeerDispatchPrompt: React.FC<PeerDispatchPromptProps> = ({
 
   if (status === 'rejected') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
-          <X size={14} className="text-zinc-500" />
-          <span className="text-zinc-500">Peer dispatch denied</span>
+          <X size={14} className="text-vscode-desc" />
+          <span className="text-vscode-desc">Peer dispatch denied</span>
         </div>
       </div>
     );
@@ -38,13 +38,13 @@ export const PeerDispatchPrompt: React.FC<PeerDispatchPromptProps> = ({
 
   return (
     <div className="px-6 py-3 ml-4 border-l-2 border-indigo-500/40 my-2 fade-in">
-      <div className="bg-zinc-900/60 border border-indigo-500/20 rounded-lg p-4 space-y-3">
+      <div className="bg-vscode-widgetBg/60 border border-indigo-500/20 rounded-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Share2 size={16} className="text-indigo-400" />
           <span className="text-sm font-medium text-indigo-300">Peer Dispatch Request</span>
         </div>
 
-        <div className="text-sm text-zinc-300">
+        <div className="text-sm text-vscode-editorFg">
           Window{' '}
           <span className="font-mono text-indigo-400/90 bg-indigo-400/10 px-1.5 py-0.5 rounded">
             {fromWindowId.slice(0, 8)}
@@ -52,7 +52,7 @@ export const PeerDispatchPrompt: React.FC<PeerDispatchPromptProps> = ({
           wants to run a task in this window:
         </div>
 
-        <pre className="text-xs font-mono bg-zinc-950 border border-zinc-800 rounded p-2.5 text-zinc-200 whitespace-pre-wrap max-h-[180px] overflow-y-auto">
+        <pre className="text-xs font-mono bg-vscode-editorBg border border-vscode-panelBorder rounded p-2.5 text-vscode-editorFg whitespace-pre-wrap max-h-[180px] overflow-y-auto">
           {task}
         </pre>
 

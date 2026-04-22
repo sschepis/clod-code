@@ -112,13 +112,13 @@ export const JsVizBlock: React.FC<JsVizBlockProps> = ({ code }) => {
   }, [code, runKey, approved]);
 
   return (
-    <div className="my-2 bg-[#0c0c0c] border border-zinc-800 rounded-md overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
-        <span className="text-xs text-zinc-500 font-mono">jsviz</span>
+    <div className="my-2 bg-[#0c0c0c] border border-vscode-panelBorder rounded-md overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-vscode-widgetBg/80 border-b border-vscode-panelBorder">
+        <span className="text-xs text-vscode-desc font-mono">jsviz</span>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setShowSource(s => !s)}
-            className={`p-1 transition-colors rounded ${showSource ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`p-1 transition-colors rounded ${showSource ? 'text-vscode-editorFg' : 'text-vscode-desc hover:text-vscode-editorFg'}`}
             title={showSource ? 'Hide source' : 'View source'}
           >
             <Code size={12} />
@@ -126,7 +126,7 @@ export const JsVizBlock: React.FC<JsVizBlockProps> = ({ code }) => {
           {approved && (
             <button
               onClick={() => setRunKey(k => k + 1)}
-              className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors rounded"
+              className="p-1 text-vscode-desc hover:text-vscode-editorFg transition-colors rounded"
               title="Rerun"
             >
               <RefreshCw size={12} />
@@ -134,7 +134,7 @@ export const JsVizBlock: React.FC<JsVizBlockProps> = ({ code }) => {
           )}
           <button
             onClick={handleCopy}
-            className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors rounded"
+            className="p-1 text-vscode-desc hover:text-vscode-editorFg transition-colors rounded"
             title="Copy code"
           >
             {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -144,7 +144,7 @@ export const JsVizBlock: React.FC<JsVizBlockProps> = ({ code }) => {
 
       {!approved ? (
         <div className="flex flex-col items-center justify-center py-8 gap-3">
-          <p className="text-xs text-zinc-500">This visualization wants to run JavaScript with network and DOM access.</p>
+          <p className="text-xs text-vscode-desc">This visualization wants to run JavaScript with network and DOM access.</p>
           <button
             onClick={() => setApproved(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded transition-colors"
@@ -158,9 +158,9 @@ export const JsVizBlock: React.FC<JsVizBlockProps> = ({ code }) => {
       )}
 
       {showSource && (
-        <div className="border-t border-zinc-800">
+        <div className="border-t border-vscode-panelBorder">
           <pre className="p-3 text-xs font-mono overflow-x-auto leading-relaxed">
-            <code className="text-zinc-300">{code}</code>
+            <code className="text-vscode-editorFg">{code}</code>
           </pre>
         </div>
       )}

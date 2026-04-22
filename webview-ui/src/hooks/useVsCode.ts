@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { postMessage, onMessage } from '../vscode-api';
 import type {
-  ExtToWebviewMessage, Attachment,
+  ExtToWebviewMessage, Attachment, RoutingMode,
   ObjectCategory, ObjectActionKind,
 } from '../../../src/shared/message-types';
 
@@ -35,8 +35,12 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     postMessage({ type: 'clear_session' });
   }, []);
 
-  const changeModel = useCallback((provider: string, model: string) => {
-    postMessage({ type: 'change_model', provider, model });
+  const changeModel = useCallback((provider: string, model: string, role?: 'triage' | 'executor') => {
+    postMessage({ type: 'change_model', provider, model, role });
+  }, []);
+
+  const changeRoutingMode = useCallback((mode: RoutingMode, agentId?: string) => {
+    postMessage({ type: 'change_routing_mode', mode, agentId });
   }, []);
 
   const revert = useCallback((eventId: string, agentId?: string) => {
@@ -87,6 +91,13 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     [],
   );
 
+  const respondPlanApproval = useCallback(
+    (promptId: string, response: { denied?: boolean; approvalMode?: 'auto' | 'manual' }, agentId?: string) => {
+      postMessage({ type: 'plan_approval_response', agentId, promptId, ...response });
+    },
+    [],
+  );
+
   const sendSlashCommand = useCallback((command: string, args: string, agentId?: string) => {
     postMessage({ type: 'slash_command', agentId, command, args });
   }, []);
@@ -115,6 +126,7 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     interrupt,
     clearSession,
     changeModel,
+    changeRoutingMode,
     revert,
     deleteEvent,
     editAndResubmit,
@@ -122,6 +134,7 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     respondQuestion,
     respondSecret,
     respondPeerDispatch,
+    respondPlanApproval,
     sendSlashCommand,
     focusAgent,
     cancelAgent,

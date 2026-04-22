@@ -5,9 +5,11 @@ export { createShellRunHandler, createShellBackgroundHandler, type ShellDeps } f
 export { createGlobSearchHandler } from './glob-search';
 export { createGrepSearchHandler } from './grep-search';
 export { createGitStatusHandler, createGitDiffHandler, createGitLogHandler, createGitCommitHandler, createGitBranchHandler, createGitStashHandler } from './git-ops';
+export { createGitReviewHandler, createGitReviewUncommittedHandler } from './git-review';
 export { createDiagnosticsHandler } from './diagnostics';
 export { createWorkspaceInfoHandler, createOpenFilesHandler } from './workspace-info';
 export { createTerminalHandler } from './terminal';
+export { createTerminalUiStateHandler } from './terminal-ui';
 export { createAskHandler } from './user-ask';
 export { createSecretHandler } from './user-secret';
 export type { AskDeps } from './user-ask';
@@ -35,6 +37,7 @@ export {
   createSurfaceUpdateHandler,
   createSurfaceDeleteHandler,
   createSurfaceOpenHandler,
+  createSurfaceScreenshotHandler,
 } from './surface-ops';
 export type { SurfaceToolDeps } from './surface-ops';
 export {
@@ -81,6 +84,43 @@ export { createChatSetTitleHandler } from './chat-title';
 export type { ChatTitleDeps } from './chat-title';
 export { createSpeakHandler } from './elevenlabs-tts';
 export type { ElevenLabsTtsDeps } from './elevenlabs-tts';
-export { createPlanProposeHandler } from './plan-propose';
+export { createPlanProposeHandler, type PlanProposeDeps } from './plan-propose';
 export { createSystemReloadHandler } from './system-reload';
 export { createSystemObserveHandler, pushSubconsciousEvent } from './system-observe';
+export {
+  createCodeSymbolsHandler,
+  createCodeDefinitionHandler,
+  createCodeReferencesHandler,
+  createCodeHoverHandler,
+  createCodeWorkspaceSymbolsHandler,
+  createCodeExploreHandler,
+  createCodeActionsHandler,
+  createCodeFixHandler,
+  createCodeRenameHandler,
+  createCodeFormatHandler,
+  createCodeCallHierarchyHandler,
+  createCodeTypeHierarchyHandler,
+  createCodeSignatureHandler,
+  createCodeCompletionsHandler,
+  createCodeInlayHintsHandler,
+} from './code-intel';
+export { createCodeMapHandler, CodeMap } from './code-map';
+export type { CodeMapDeps } from './code-map';
+export {
+  createProjectHandlers,
+  createProjectInitHandler,
+  createProjectListHandler,
+  createProjectGetHandler,
+  createProjectUpdateHandler,
+  createProjectPlanCreateHandler,
+  createProjectPlanUpdateHandler,
+  createProjectPlanListHandler,
+  createProjectTaskCreateHandler,
+  createProjectTaskUpdateHandler,
+  createProjectTaskListHandler,
+  createProjectReviewCreateHandler,
+  createProjectReviewUpdateHandler,
+  createProjectStatusHandler,
+  createProjectArchiveHandler,
+} from './project-ops';
+export type { ProjectToolDeps } from './project-ops';

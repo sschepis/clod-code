@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 export function createTerminalHandler() {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const cmd = String(kwargs.cmd || kwargs.command || '');
-    const name = String(kwargs.name || 'Obotovs');
+    const name = String(kwargs.name || 'Oboto VS');
 
     // Find or create terminal
     let terminal = vscode.window.terminals.find(t => t.name === name);

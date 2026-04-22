@@ -33,7 +33,7 @@ export function createAgentSpawnHandler(deps: AgentToolDeps) {
         : undefined;
     const shouldAwait = kwargs.await === true;
     const label = typeof kwargs.label === 'string' ? kwargs.label : undefined;
-    const VALID_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer'] as const;
+    const VALID_ROLES = ['orchestrator', 'planner', 'actor', 'summarizer', 'coder'] as const;
     const rawRole = typeof kwargs.role === 'string' ? kwargs.role.trim().toLowerCase() : '';
     const role = (VALID_ROLES as readonly string[]).includes(rawRole) ? rawRole as PromptRole : undefined;
 

@@ -20,8 +20,8 @@ export function createMemoryAddHandler(deps: MemoryToolDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const title = typeof kwargs.title === 'string' ? kwargs.title.trim() : '';
     const body = typeof kwargs.body === 'string' ? kwargs.body.trim() : '';
-    if (!title) return '[ERROR] Missing required argument: title';
-    if (!body) return '[ERROR] Missing required argument: body';
+    if (!title) return '[ERROR] Missing required argument: title. Provide a short label (e.g. "user prefers Python", "API uses OAuth2").';
+    if (!body) return '[ERROR] Missing required argument: body. Provide the fact or note to remember (e.g. "The user is a data scientist focused on ML pipelines").';
     const tags = Array.isArray(kwargs.tags)
       ? (kwargs.tags as unknown[]).filter((t): t is string => typeof t === 'string')
       : typeof kwargs.tags === 'string'
@@ -37,7 +37,7 @@ export function createMemoryAddHandler(deps: MemoryToolDeps) {
 export function createMemoryRecallHandler(deps: MemoryToolDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const query = typeof kwargs.query === 'string' ? kwargs.query.trim() : '';
-    if (!query) return '[ERROR] Missing required argument: query';
+    if (!query) return '[ERROR] Missing required argument: query. Provide a free-text query to search memories (e.g. "user preferences", "project architecture"). Results are ranked by semantic relevance.';
     const scope = (typeof kwargs.scope === 'string' && VALID_SCOPES.has(kwargs.scope))
       ? (kwargs.scope as RecallScope) : 'all';
     const k = typeof kwargs.k === 'number' && kwargs.k > 0 ? Math.min(20, Math.floor(kwargs.k)) : 5;
@@ -57,8 +57,8 @@ export function createMemoryPromoteHandler(deps: MemoryToolDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const id = typeof kwargs.id === 'string' ? kwargs.id : '';
     const to = kwargs.to === 'project' || kwargs.to === 'global' ? kwargs.to : null;
-    if (!id) return '[ERROR] Missing required argument: id';
-    if (!to) return '[ERROR] Missing required argument: to ("project" or "global")';
+    if (!id) return '[ERROR] Missing required argument: id. Use the entry id from memory/recall or memory/list.';
+    if (!to) return '[ERROR] Missing required argument: to. Must be "project" (persists across conversations in this workspace) or "global" (persists across all workspaces).';
 
     const promoted = deps.manager.promote(deps.callerId(), id, to);
     if (!promoted) return `[ERROR] No entry found with id=${id} in any scope reachable from this agent.`;

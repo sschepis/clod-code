@@ -21,6 +21,21 @@ const PROVIDER_TYPES = [
   { value: 'lmstudio', label: 'LM Studio' },
 ];
 
+const PROVIDER_API_KEY_INFO: Record<string, { requiresApiKey: boolean; envKeyVar: string }> = {
+  anthropic:        { requiresApiKey: true,  envKeyVar: 'ANTHROPIC_API_KEY' },
+  openai:           { requiresApiKey: true,  envKeyVar: 'OPENAI_API_KEY' },
+  gemini:           { requiresApiKey: true,  envKeyVar: 'GOOGLE_AI_API_KEY' },
+  openrouter:       { requiresApiKey: true,  envKeyVar: 'OPENROUTER_API_KEY' },
+  deepseek:         { requiresApiKey: true,  envKeyVar: 'DEEPSEEK_API_KEY' },
+  'azure-openai':   { requiresApiKey: true,  envKeyVar: 'AZURE_OPENAI_API_KEY' },
+  'vertex-gemini':  { requiresApiKey: false, envKeyVar: 'GOOGLE_APPLICATION_CREDENTIALS' },
+  'vertex-anthropic': { requiresApiKey: false, envKeyVar: 'GOOGLE_APPLICATION_CREDENTIALS' },
+  ollama:           { requiresApiKey: false, envKeyVar: '' },
+  lmstudio:         { requiresApiKey: false, envKeyVar: '' },
+  'vscode-lm':     { requiresApiKey: false, envKeyVar: '' },
+  openclaw: { requiresApiKey: false, envKeyVar: '' },
+};
+
 declare function acquireVsCodeApi(): {
   postMessage(msg: SettingsWebviewToExt): void;
 };
@@ -40,6 +55,7 @@ const PERMISSION_MODES = [
 const ROUTING_ROLES = [
   { key: 'triage' as const, label: 'Triage', description: 'Quick classification — a fast, cheap model works well' },
   { key: 'executor' as const, label: 'Executor', description: 'Main task execution — the workhorse model' },
+  { key: 'coder' as const, label: 'Coder', description: 'Code generation, file edits, and coding tasks' },
   { key: 'planner' as const, label: 'Planner', description: 'Planning and architecture' },
   { key: 'summarizer' as const, label: 'Summarizer', description: 'Compaction and summarization' },
 ];
@@ -68,11 +84,21 @@ export default function SettingsApp() {
     const listener = (e: MessageEvent<SettingsExtToWebview>) => {
       const msg = e.data;
       switch (msg.type) {
-        case 'sync':
+        case 'sync': {
           setSettings(msg.settings);
           setProviderOptions(msg.providers);
           setDraft({});
+          const restored: Record<string, TestResult> = {};
+          for (const p of msg.providers) {
+            if (p.lastTestResult) {
+              restored[p.id] = { ...p.lastTestResult, timestamp: Date.now() };
+            }
+          }
+          if (Object.keys(restored).length > 0) {
+            setTestResults(prev => ({ ...restored, ...prev }));
+          }
           break;
+        }
         case 'save_result': {
           setSaveStatus({ success: msg.success, message: msg.message });
           setTimeout(() => setSaveStatus(null), 4000);
@@ -125,7 +151,7 @@ export default function SettingsApp() {
     return (draft.providers ?? settings?.providers ?? {}) as Record<string, SettingsProviderConfig>;
   };
 
-  const currentRouting = (): Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer', SettingsRouteAssignment>> => {
+  const currentRouting = (): Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer' | 'coder', SettingsRouteAssignment>> => {
     return (draft.routing ?? settings?.routing ?? {}) as any;
   };
 
@@ -180,10 +206,10 @@ export default function SettingsApp() {
     vscode.postMessage({ type: 'reset_to_defaults' });
   };
 
-  const handleTest = (providerId: string, model: string) => {
+  const handleTest = (providerId: string, model: string, config?: SettingsProviderConfig) => {
     setTestingIds(prev => new Set(prev).add(providerId));
     setTestResults(prev => { const next = { ...prev }; delete next[providerId]; return next; });
-    vscode.postMessage({ type: 'test_connection', providerId, model });
+    vscode.postMessage({ type: 'test_connection', providerId, model, config });
   };
 
   const handlePullModel = (model: string) => {
@@ -209,7 +235,7 @@ export default function SettingsApp() {
 
   if (!settings) {
     return (
-      <div className="flex items-center justify-center h-screen text-zinc-500">
+      <div className="flex items-center justify-center h-screen text-vscode-desc">
         <Loader2 className="animate-spin" size={20} />
         <span className="ml-2">Loading settings...</span>
       </div>
@@ -233,19 +259,19 @@ export default function SettingsApp() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-[#121214] text-zinc-200 overflow-hidden">
+    <div className="h-screen flex flex-col bg-vscode-editorBg text-vscode-editorFg overflow-hidden">
       {/* Header */}
-      <header className="flex-shrink-0 bg-zinc-950 border-b border-zinc-800 px-6 py-4 flex items-center justify-between z-10">
+      <header className="flex-shrink-0 bg-vscode-editorBg border-b border-vscode-panelBorder px-6 py-4 flex items-center justify-between z-10">
         <div>
-          <h1 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-vscode-editorFg flex items-center gap-2">
             <Sliders size={18} className="text-indigo-400" />
             Oboto Settings
           </h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Configure providers, routing, permissions, and behavior</p>
+          <p className="text-xs text-vscode-desc mt-0.5">Configure providers, routing, permissions, and behavior</p>
         </div>
         <button
           onClick={handleOpenLogs}
-          className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 px-3 py-1.5 rounded border border-zinc-800 hover:border-zinc-700 transition-colors"
+          className="text-xs text-vscode-desc hover:text-vscode-editorFg flex items-center gap-1.5 px-3 py-1.5 rounded border border-vscode-panelBorder hover:border-vscode-widgetBorder transition-colors"
         >
           <ScrollText size={14} /> View Logs
         </button>
@@ -262,8 +288,8 @@ export default function SettingsApp() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Cpu size={16} className="text-emerald-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Providers</h2>
-            <span className="text-xs text-zinc-500">Configure LLM connections</span>
+            <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">Providers</h2>
+            <span className="text-xs text-vscode-desc">Configure LLM connections</span>
           </div>
 
           {/* Managed Oboto Local provider card */}
@@ -291,7 +317,7 @@ export default function SettingsApp() {
                 onToggleApiKey={() => toggleApiKeyVisibility(id)}
                 onChange={(cfg) => updateProvider(id, cfg)}
                 onDelete={() => removeProvider(id)}
-                onTest={(model) => handleTest(id, model)}
+                onTest={(model) => handleTest(id, model, config)}
                 testing={testingIds.has(id)}
                 testResult={testResults[id] ?? null}
               />
@@ -300,7 +326,7 @@ export default function SettingsApp() {
 
           {/* Add provider */}
           {addingProvider ? (
-            <div className="p-4 border border-dashed border-zinc-700 rounded-lg space-y-3">
+            <div className="p-4 border border-dashed border-vscode-widgetBorder rounded-lg space-y-3">
               <Field label="Provider type">
                 <select
                   value={newProviderType}
@@ -321,7 +347,7 @@ export default function SettingsApp() {
                 </button>
                 <button
                   onClick={() => setAddingProvider(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 rounded transition-colors"
+                  className="px-3 py-1.5 text-xs font-medium text-vscode-desc hover:text-vscode-editorFg rounded transition-colors"
                 >
                   Cancel
                 </button>
@@ -330,7 +356,7 @@ export default function SettingsApp() {
           ) : (
             <button
               onClick={() => setAddingProvider(true)}
-              className="w-full p-3 border border-dashed border-zinc-700 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors flex items-center justify-center gap-1.5"
+              className="w-full p-3 border border-dashed border-vscode-widgetBorder rounded-lg text-xs text-vscode-desc hover:text-vscode-editorFg hover:border-zinc-500 transition-colors flex items-center justify-center gap-1.5"
             >
               <Plus size={14} /> Add Provider
             </button>
@@ -341,12 +367,12 @@ export default function SettingsApp() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <ArrowRight size={16} className="text-indigo-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Routing</h2>
-            <span className="text-xs text-zinc-500">Assign providers to task roles</span>
+            <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">Routing</h2>
+            <span className="text-xs text-vscode-desc">Assign providers to task roles</span>
           </div>
 
           <Field label="">
-            <label className="flex items-start gap-2 text-sm text-zinc-300 cursor-pointer">
+            <label className="flex items-start gap-2 text-sm text-vscode-editorFg cursor-pointer">
               <input
                 type="checkbox"
                 checked={value('triageEnabled') ?? true}
@@ -355,7 +381,7 @@ export default function SettingsApp() {
               />
               <span>
                 <span className="font-medium">Enable dual-LLM triage</span>
-                <div className="text-xs text-zinc-500 mt-0.5 font-normal">
+                <div className="text-xs text-vscode-desc mt-0.5 font-normal">
                   Use a separate model to classify whether a query needs the main executor model.
                   Saves cost on simple queries.
                 </div>
@@ -365,7 +391,7 @@ export default function SettingsApp() {
 
           {ROUTING_ROLES.map(role => {
             const assignment = routing[role.key];
-            const isOptional = role.key === 'planner' || role.key === 'summarizer';
+            const isOptional = role.key === 'planner' || role.key === 'summarizer' || role.key === 'coder';
             const isTriageDisabled = role.key === 'triage' && !(value('triageEnabled') ?? true);
             const models = assignment?.providerId ? getModelsForProviderId(assignment.providerId) : [];
 
@@ -373,17 +399,17 @@ export default function SettingsApp() {
               <div
                 key={role.key}
                 className={`p-4 rounded-lg border ${
-                  isTriageDisabled ? 'opacity-50 border-zinc-800 bg-zinc-900/20' : 'border-zinc-800 bg-zinc-900/40'
+                  isTriageDisabled ? 'opacity-50 border-vscode-panelBorder bg-vscode-widgetBg/20' : 'border-vscode-panelBorder bg-vscode-widgetBg/40'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm font-medium text-zinc-200">{role.label}</span>
-                  <span className="text-xs text-zinc-500">{role.description}</span>
+                  <span className="text-sm font-medium text-vscode-editorFg">{role.label}</span>
+                  <span className="text-xs text-vscode-desc">{role.description}</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Provider</label>
+                    <label className="block text-xs font-medium text-vscode-desc mb-1">Provider</label>
                     <select
                       value={assignment?.providerId ?? (isOptional ? '' : 'oboto')}
                       onChange={e => {
@@ -405,7 +431,7 @@ export default function SettingsApp() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Model</label>
+                    <label className="block text-xs font-medium text-vscode-desc mb-1">Model</label>
                     <select
                       value={assignment?.model ?? ''}
                       onChange={e => {
@@ -425,7 +451,7 @@ export default function SettingsApp() {
                 </div>
 
                 {isTriageDisabled && (
-                  <div className="mt-2 text-xs text-zinc-500">
+                  <div className="mt-2 text-xs text-vscode-desc">
                     Triage disabled — all queries go directly to the executor.
                   </div>
                 )}
@@ -438,7 +464,7 @@ export default function SettingsApp() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Shield size={16} className="text-amber-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Permissions</h2>
+            <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">Permissions</h2>
           </div>
 
           <Field label="Permission mode">
@@ -449,7 +475,7 @@ export default function SettingsApp() {
                   className={`flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors ${
                     value('permissionMode') === mode.value
                       ? 'bg-indigo-500/10 border-indigo-500/40'
-                      : 'bg-zinc-900/40 border-zinc-800 hover:bg-zinc-900/60'
+                      : 'bg-vscode-widgetBg/40 border-vscode-panelBorder hover:bg-vscode-widgetBg/60'
                   }`}
                 >
                   <input
@@ -461,8 +487,8 @@ export default function SettingsApp() {
                     className="mt-1"
                   />
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-zinc-200">{mode.label}</div>
-                    <div className="text-xs text-zinc-500 mt-0.5">{mode.description}</div>
+                    <div className="text-sm font-medium text-vscode-editorFg">{mode.label}</div>
+                    <div className="text-xs text-vscode-desc mt-0.5">{mode.description}</div>
                   </div>
                 </label>
               ))}
@@ -474,7 +500,7 @@ export default function SettingsApp() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <Sliders size={16} className="text-cyan-400" />
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">Behavior</h2>
+            <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">Behavior</h2>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -502,7 +528,7 @@ export default function SettingsApp() {
           </div>
 
           <Field label="">
-            <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-vscode-editorFg cursor-pointer">
               <input
                 type="checkbox"
                 checked={value('autoCompact') ?? true}
@@ -534,15 +560,15 @@ export default function SettingsApp() {
               placeholder="CLAUDE.md"
               className="input"
             />
-            <p className="text-xs text-zinc-500 mt-1.5">
+            <p className="text-xs text-vscode-desc mt-1.5">
               File names searched up the directory tree to load project-specific instructions.
             </p>
           </Field>
 
           <Field label="">
             <div className="flex items-center gap-2 mb-1.5">
-              <Terminal size={14} className="text-zinc-400" />
-              <label className="text-xs font-medium text-zinc-400">Default shell</label>
+              <Terminal size={14} className="text-vscode-desc" />
+              <label className="text-xs font-medium text-vscode-desc">Default shell</label>
             </div>
             <select
               value={value('shell') ?? ''}
@@ -554,16 +580,54 @@ export default function SettingsApp() {
               <option value="/bin/bash">Bash</option>
               <option value="/bin/sh">POSIX sh</option>
             </select>
-            <p className="text-xs text-zinc-500 mt-1.5">
+            <p className="text-xs text-vscode-desc mt-1.5">
               Shell used for tool commands. Auto-detect uses your $SHELL environment variable.
             </p>
           </Field>
         </section>
+
+        <div className="flex items-center gap-2 mt-8 mb-4 border-b border-vscode-widgetBorder pb-2">
+          <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">AlephNet Integration</h2>
+        </div>
+        <div className="space-y-4">
+          <Field label="">
+            <label className="flex items-center gap-2 text-sm text-vscode-editorFg cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value('alephnet')?.enabled ?? false}
+                onChange={e => update('alephnet', { ...value('alephnet'), enabled: e.target.checked })}
+                className="checkbox"
+              />
+              Enable local AlephNet Node (Semantic mesh & GMF)
+            </label>
+          </Field>
+          {value('alephnet')?.enabled && (
+            <div className="grid grid-cols-2 gap-4 pl-6 border-l-2 border-vscode-widgetBorder">
+              <Field label="Port">
+                <input
+                  type="number"
+                  value={value('alephnet')?.port ?? 31337}
+                  onChange={e => update('alephnet', { ...value('alephnet'), port: parseInt(e.target.value, 10) || 31337 })}
+                  className="input"
+                />
+              </Field>
+              <Field label="Node ID (optional)">
+                <input
+                  type="text"
+                  value={value('alephnet')?.nodeId ?? ''}
+                  onChange={e => update('alephnet', { ...value('alephnet'), nodeId: e.target.value })}
+                  className="input"
+                  placeholder="Leave empty for auto-generated"
+                />
+              </Field>
+            </div>
+          )}
+        </div>
         </div>
       </div>
 
       {/* Action bar */}
-      <div className="flex-shrink-0 bg-zinc-950 border-t border-zinc-800 px-6 py-3 flex items-center justify-between">
+      <div className="flex-shrink-0 bg-vscode-editorBg border-t border-vscode-panelBorder px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3 text-xs">
           {saveStatus && (
             <div className={`flex items-center gap-1.5 ${saveStatus.success ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -579,7 +643,7 @@ export default function SettingsApp() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleReset}
-            className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors flex items-center gap-1.5"
+            className="px-3 py-1.5 text-xs font-medium text-vscode-desc hover:text-vscode-editorFg hover:bg-vscode-inputBg rounded transition-colors flex items-center gap-1.5"
           >
             <RotateCcw size={14} /> Reset to defaults
           </button>
@@ -589,7 +653,7 @@ export default function SettingsApp() {
             className={`px-4 py-1.5 text-xs font-semibold rounded flex items-center gap-1.5 transition-colors ${
               hasChanges
                 ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                : 'bg-vscode-inputBg text-vscode-disabled cursor-not-allowed'
             }`}
           >
             <Save size={14} /> Save changes
@@ -632,7 +696,7 @@ export default function SettingsApp() {
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>
-    {label && <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>}
+    {label && <label className="block text-xs font-medium text-vscode-desc mb-1.5">{label}</label>}
     {children}
   </div>
 );
@@ -670,19 +734,27 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
     }
   };
 
+  const managedBorderBg = testResult?.success === true
+    ? 'border-emerald-700/60 bg-emerald-950/25'
+    : testResult?.success === false
+      ? 'border-red-700/60 bg-red-950/25'
+      : isRunning
+        ? 'border-amber-700/50 bg-amber-950/20'
+        : 'border-vscode-panelBorder bg-vscode-widgetBg/40';
+
   return (
-    <div className="p-4 rounded-lg border border-emerald-900/50 bg-emerald-950/20 space-y-3">
+    <div className={`p-4 rounded-lg border ${managedBorderBg} space-y-3`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Cpu size={16} className="text-emerald-400" />
-          <span className="text-sm font-medium text-zinc-200">Oboto Local</span>
+          <span className="text-sm font-medium text-vscode-editorFg">Oboto Local</span>
           <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400 border border-emerald-800/40">
             managed
           </span>
         </div>
         <div className="flex items-center gap-2">
           <span className={`inline-block w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-vscode-desc">
             Ollama {isRunning ? 'running' : 'offline'}
           </span>
         </div>
@@ -739,7 +811,7 @@ const ManagedProviderCard: React.FC<ManagedProviderCardProps> = ({
             if (name?.trim()) onPull(name.trim());
           }}
           disabled={pulling}
-          className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-medium bg-vscode-inputBg hover:bg-vscode-hoverBg text-vscode-editorFg rounded transition-colors flex items-center gap-1.5 disabled:opacity-50"
         >
           <Download size={12} /> Pull custom model
         </button>
@@ -767,17 +839,34 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
   const models = option?.models ?? [];
   const selectedModel = config.defaultModel || models[0] || '';
 
+  const typeInfo = PROVIDER_API_KEY_INFO[config.type];
+  const requiresApiKey = option?.requiresApiKey ?? typeInfo?.requiresApiKey ?? false;
+  const envKeyVar = option?.envKeyVar ?? typeInfo?.envKeyVar ?? '';
+  const envKeySet = option?.envKeySet ?? false;
+
+  const hasConfig = requiresApiKey
+    ? !!(config.apiKey?.trim() || envKeySet)
+    : true;
+
+  const borderBg = testResult?.success === true
+    ? 'border-emerald-700/60 bg-emerald-950/25'
+    : testResult?.success === false
+      ? 'border-red-700/60 bg-red-950/25'
+      : hasConfig
+        ? 'border-amber-700/50 bg-amber-950/20'
+        : 'border-vscode-panelBorder bg-vscode-widgetBg/40';
+
   return (
-    <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-900/40 space-y-3">
+    <div className={`p-4 rounded-lg border ${borderBg} space-y-3`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Globe size={16} className="text-indigo-400" />
-          <span className="text-sm font-medium text-zinc-200">{config.label || id}</span>
-          <span className="text-xs text-zinc-500">({config.type})</span>
+          <span className="text-sm font-medium text-vscode-editorFg">{config.label || id}</span>
+          <span className="text-xs text-vscode-desc">({config.type})</span>
         </div>
         <button
           onClick={onDelete}
-          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+          className="p-1 text-vscode-desc hover:text-red-400 transition-colors"
           title="Remove provider"
         >
           <Trash2 size={14} />
@@ -795,7 +884,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
           />
         </Field>
 
-        <Field label="Default model">
+        <Field label={config.type === 'azure-openai' ? 'Deployment name' : 'Default model'}>
           {models.length > 0 ? (
             <select
               value={selectedModel}
@@ -806,6 +895,14 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
+          ) : config.type === 'azure-openai' ? (
+            <input
+              type="text"
+              value={config.defaultModel || ''}
+              onChange={e => onChange({ ...config, defaultModel: e.target.value })}
+              placeholder="e.g. gpt-4o"
+              className="input"
+            />
           ) : (
             <select disabled className="select">
               <option>Save to fetch models</option>
@@ -814,39 +911,41 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
         </Field>
       </div>
 
-      {option?.requiresApiKey && (
+      {requiresApiKey && (
         <Field label="API Key">
           <div className="relative">
             <input
               type={showApiKey ? 'text' : 'password'}
               value={config.apiKey || ''}
               onChange={e => onChange({ ...config, apiKey: e.target.value })}
-              placeholder={option.envKeySet ? `Using ${option.envKeyVar} env var` : 'Paste your API key'}
+              placeholder={envKeySet ? `Using ${envKeyVar} env var` : 'Paste your API key'}
               className="input pr-10"
             />
             <button
               type="button"
               onClick={onToggleApiKey}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-vscode-desc hover:text-vscode-editorFg"
             >
               {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <div className="text-xs text-zinc-500 mt-1.5 flex items-center gap-1.5">
-            <Key size={12} />
-            Env var: <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-zinc-400">{option.envKeyVar}</code>
-            {option.envKeySet && <span className="text-emerald-500">detected</span>}
-          </div>
+          {envKeyVar && (
+            <div className="text-xs text-vscode-desc mt-1.5 flex items-center gap-1.5">
+              <Key size={12} />
+              Env var: <code className="bg-vscode-widgetBg px-1.5 py-0.5 rounded text-vscode-desc">{envKeyVar}</code>
+              {envKeySet && <span className="text-emerald-500">detected</span>}
+            </div>
+          )}
         </Field>
       )}
 
-      {config.baseUrl !== undefined && (
-        <Field label="Base URL">
+      {(config.baseUrl !== undefined || config.type === 'azure-openai') && (
+        <Field label={config.type === 'azure-openai' ? 'Endpoint URL (required)' : 'Base URL'}>
           <input
             type="text"
             value={config.baseUrl || ''}
             onChange={e => onChange({ ...config, baseUrl: e.target.value })}
-            placeholder={option?.defaultBaseUrl || 'Default'}
+            placeholder={config.type === 'azure-openai' ? 'https://your-resource.openai.azure.com' : (option?.defaultBaseUrl || 'Default')}
             className="input"
           />
         </Field>
@@ -877,7 +976,7 @@ const TestButton: React.FC<TestButtonProps> = ({ label, onClick, testing, result
     <button
       onClick={onClick}
       disabled={testing || disabled}
-      className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded transition-colors flex items-center gap-1.5 disabled:opacity-50 flex-shrink-0"
+      className="px-3 py-1.5 text-xs font-medium bg-vscode-inputBg hover:bg-vscode-hoverBg text-vscode-editorFg rounded transition-colors flex items-center gap-1.5 disabled:opacity-50 flex-shrink-0"
     >
       {testing ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
       {testing ? 'Testing...' : label}

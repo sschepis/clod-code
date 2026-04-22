@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type {
   SessionEvent, PhaseState, CostState, ModelInfo, SlashCommandInfo, AgentSummary, AgentSyncMetrics, PeerUiSnapshot, OutboundDispatchUi,
-  ObjectSnapshot,
+  ObjectSnapshot, RoutingMode,
 } from '../../../src/shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../../../src/shared/message-types';
 
@@ -13,6 +13,8 @@ export interface AgentUiSlice {
   phase: PhaseState;
   cost: CostState;
   activeModel: ModelInfo;
+  triageModel?: ModelInfo;
+  routingMode: RoutingMode;
   mode: 'act' | 'plan';
 }
 
@@ -46,6 +48,7 @@ const DEFAULT_SLICE: AgentUiSlice = {
   phase: { phase: 'idle', message: '' },
   cost: { totalTokens: 0, totalCost: 0 },
   activeModel: DEFAULT_MODEL,
+  routingMode: 'dual',
   mode: 'act',
 };
 
@@ -76,12 +79,14 @@ const INITIAL_STATE: AppState = {
   objects: EMPTY_OBJECTS,
 };
 
-function ensureSlice(state: AppState, agentId: string, seedModel?: ModelInfo): AgentUiSlice {
+function ensureSlice(state: AppState, agentId: string, seedModel?: ModelInfo, triageModel?: ModelInfo, routingMode?: RoutingMode): AgentUiSlice {
   const existing = state.slices[agentId];
   if (existing) return existing;
   const slice: AgentUiSlice = {
     ...DEFAULT_SLICE,
     activeModel: seedModel ?? DEFAULT_MODEL,
+    triageModel,
+    routingMode: routingMode ?? 'dual',
   };
   state.slices[agentId] = slice;
   return slice;
@@ -226,6 +231,23 @@ export function useMessages() {
     });
   }, []);
 
+  const updatePlanApprovalStatus = useCallback((
+    agentId: string,
+    promptId: string,
+    patch: { status: 'approved' | 'denied'; approvalMode?: 'auto' | 'manual' },
+  ) => {
+    setState(prev => {
+      const slice = prev.slices[agentId];
+      if (!slice) return prev;
+      const events = slice.events.map(e =>
+        e.role === 'plan_approval' && (e as any).promptId === promptId
+          ? { ...e, ...patch }
+          : e,
+      );
+      return { ...prev, slices: { ...prev.slices, [agentId]: { ...slice, events } } };
+    });
+  }, []);
+
   const sync = useCallback((
     agentId: string,
     events: SessionEvent[],
@@ -233,10 +255,12 @@ export function useMessages() {
     cost: CostState,
     activeModel: ModelInfo,
     mode: 'act' | 'plan',
+    triageModel?: ModelInfo,
+    routingMode?: RoutingMode,
   ) => {
     setState(prev => {
       const slices = { ...prev.slices };
-      slices[agentId] = { events, phase, cost, activeModel, mode };
+      slices[agentId] = { events, phase, cost, activeModel, triageModel, routingMode: routingMode ?? 'dual', mode };
       return { ...prev, slices };
     });
   }, []);
@@ -265,11 +289,16 @@ export function useMessages() {
     });
   }, []);
 
-  const setModel = useCallback((agentId: string, model: ModelInfo) => {
+  const setModel = useCallback((agentId: string, model: ModelInfo, triageModel?: ModelInfo, routingMode?: RoutingMode) => {
     setState(prev => {
       const slice = prev.slices[agentId];
       if (!slice) return prev;
-      return { ...prev, slices: { ...prev.slices, [agentId]: { ...slice, activeModel: model } } };
+      return { ...prev, slices: { ...prev.slices, [agentId]: {
+        ...slice,
+        activeModel: model,
+        ...(triageModel !== undefined ? { triageModel } : {}),
+        ...(routingMode !== undefined ? { routingMode } : {}),
+      } } };
     });
   }, []);
 
@@ -396,6 +425,7 @@ export function useMessages() {
     updateQuestionStatus,
     updateSecretStatus,
     updatePeerDispatchStatus,
+    updatePlanApprovalStatus,
     sync,
     syncAgents,
     setPhase,

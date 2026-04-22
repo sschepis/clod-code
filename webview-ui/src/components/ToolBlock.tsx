@@ -11,6 +11,7 @@ const AUTO_EXPAND_TOOLS = new Set([
   'shell run', 'shell background', 'shell terminal',
   'bash', 'terminal',
   'git diff', 'git log',
+  'git review', 'git review-uncommitted',
 ]);
 
 /** Strip a practical subset of ANSI escape sequences:
@@ -84,6 +85,8 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   'git diff': <GitBranch size={14} className="text-orange-400" />,
   'git log': <GitBranch size={14} className="text-orange-400" />,
   'git commit': <GitBranch size={14} className="text-orange-400" />,
+  'git review': <GitBranch size={14} className="text-orange-400" />,
+  'git review-uncommitted': <GitBranch size={14} className="text-orange-400" />,
   'workspace diagnostics': <AlertTriangle size={14} className="text-yellow-400" />,
   web_search: <Globe size={14} className="text-teal-400" />,
 };
@@ -92,12 +95,12 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
   const autoExpand = AUTO_EXPAND_TOOLS.has(toolName) || AUTO_EXPAND_TOOLS.has(command);
   const [isExpanded, setIsExpanded] = useState(autoExpand);
 
-  const icon = TOOL_ICONS[toolName] || TOOL_ICONS[command] || <Terminal size={14} className="text-zinc-400" />;
+  const icon = TOOL_ICONS[toolName] || TOOL_ICONS[command] || <Terminal size={14} className="text-vscode-desc" />;
 
   const cleanOutput = useMemo(() => (output ? stripAnsi(output) : ''), [output]);
 
   const statusIcon = (() => {
-    if (status === 'running') return <Loader2 size={14} className="text-zinc-400 animate-spin" />;
+    if (status === 'running') return <Loader2 size={14} className="text-vscode-desc animate-spin" />;
     if (status === 'success') return <Check size={14} className="text-emerald-500" />;
     if (status === 'error') return <AlertTriangle size={14} className="text-red-400" />;
     return null;
@@ -107,41 +110,46 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
   const detail = summarizeKwargs(command, kwargs);
 
   return (
-    <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 group relative fade-in">
+    <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 group relative fade-in">
       <ActionMenu content={command + '\n' + (output || '')} onRevert={onRevert} id={id} role="assistant" />
 
       <div
-        className="flex items-center gap-3 cursor-pointer select-none bg-zinc-900/40 hover:bg-zinc-800/60 p-2 rounded-md border border-zinc-800/50 transition-colors"
+        className="flex items-center gap-3 cursor-pointer select-none bg-vscode-widgetBg/40 hover:bg-vscode-inputBg/60 p-2 rounded-md border border-vscode-panelBorder/50 transition-colors"
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label={`${displayName} tool — ${status}`}
         onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsExpanded(!isExpanded); } }}
       >
-        <div className="flex items-center justify-center w-5 h-5 text-zinc-500">
+        <div className="flex items-center justify-center w-5 h-5 text-vscode-desc">
           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </div>
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {icon}
-          <span className="text-xs font-semibold text-zinc-300 bg-zinc-800/80 px-2 py-0.5 rounded uppercase tracking-wider">
+          <span className="text-xs font-semibold text-vscode-editorFg bg-vscode-inputBg/80 px-2 py-0.5 rounded uppercase tracking-wider">
             {displayName}
           </span>
-          <span className="text-sm text-zinc-500 font-mono truncate">{detail || command}</span>
+          <span className="text-sm text-vscode-desc font-mono truncate">{detail || command}</span>
         </div>
 
         <div className="flex items-center gap-3 pl-2 pr-8 group-hover:pr-24 transition-all">
-          {duration && <span className="text-xs text-zinc-600 font-mono">{duration}</span>}
+          {duration && <span className="text-xs text-vscode-disabled font-mono">{duration}</span>}
           {statusIcon}
         </div>
       </div>
 
       {isExpanded && output && (
         <div className="mt-2 ml-8 mr-4 mb-2">
-          <div className="bg-[#0c0c0c] border border-zinc-800 rounded-md overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
-              <span className="text-xs text-zinc-500 font-mono">Output</span>
-              <span className="text-[10px] text-zinc-600 font-mono">
+          <div className="bg-[#0c0c0c] border border-vscode-panelBorder rounded-md overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-vscode-widgetBg/80 border-b border-vscode-panelBorder">
+              <span className="text-xs text-vscode-desc font-mono">Output</span>
+              <span className="text-[10px] text-vscode-disabled font-mono">
                 {cleanOutput.split('\n').length} lines · {cleanOutput.length} chars
               </span>
             </div>
-            <pre className="p-3 text-xs font-mono text-zinc-300 overflow-x-auto whitespace-pre leading-relaxed max-h-[480px] overflow-y-auto">
+            <pre className="p-3 text-xs font-mono text-vscode-editorFg overflow-x-auto whitespace-pre leading-relaxed max-h-[480px] overflow-y-auto">
               <code>{cleanOutput}</code>
             </pre>
           </div>

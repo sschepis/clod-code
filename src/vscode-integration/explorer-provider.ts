@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import type { AgentSummary } from '../shared/message-types';
+import * as alephApi from '../config/alephnet-api';
+import { getAlephNetStatus } from '../config/alephnet-manager';
+import { COMMANDS } from '../shared/constants';
 
-export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'obotovs-item' | 'task-group' | 'task-item';
+export type ExplorerNodeType = 'virtual-root' | 'workspace-root' | 'file' | 'directory' | 'obotovs-item' | 'task-group' | 'task-item' | 'alephnet-category' | 'alephnet-item';
 
 const MIME_TYPE = 'application/vnd.code.tree.obotovs.explorer';
 
@@ -137,6 +140,8 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
     if (!element) {
       return [
         new ExplorerNode('Tasks', vscode.TreeItemCollapsibleState.Expanded, 'virtual-root', undefined, new vscode.ThemeIcon('tasklist')),
+        new ExplorerNode('AlephNet', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('globe')),
+        new ExplorerNode('Projects', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('project')),
         new ExplorerNode('Surfaces', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('browser')),
         new ExplorerNode('Routes', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('symbol-event')),
         new ExplorerNode('Conversations', vscode.TreeItemCollapsibleState.Collapsed, 'virtual-root', undefined, new vscode.ThemeIcon('comment-discussion')),
@@ -148,6 +153,10 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
     if (element.nodeType === 'virtual-root') {
       if (element.label === 'Tasks') {
         return this.getTaskChildren();
+      }
+
+      if (element.label === 'AlephNet') {
+        return this.getAlephNetChildren();
       }
 
       if (element.label === 'Workspace') {
@@ -182,6 +191,7 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
           case 'Routes': subfolder = 'routes'; category = 'route'; break;
           case 'Conversations': subfolder = 'conversations'; category = 'conversation'; break;
           case 'Skills': subfolder = 'skills'; category = 'skill'; break;
+          case 'Projects': subfolder = 'projects'; category = 'project'; break;
         }
 
         const obotovsDir = vscode.Uri.joinPath(rootUri, '.obotovs', subfolder);
@@ -191,6 +201,10 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
 
     if (element.nodeType === 'task-group') {
       return this.getTaskGroupChildren(element.label as string);
+    }
+
+    if (element.nodeType === 'alephnet-category') {
+      return this.getAlephNetCategoryChildren(element.label as string);
     }
 
     if (element.nodeType === 'workspace-root' || element.nodeType === 'directory') {
@@ -390,6 +404,238 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
     } catch (error) {
       return [];
     }
+  }
+
+  // ── AlephNet Tree ──────────────────────────────────────────────────
+
+  private async getAlephNetChildren(): Promise<ExplorerNode[]> {
+    const status = await getAlephNetStatus();
+
+    if (!status.connected) {
+      const node = new ExplorerNode(
+        'Not connected',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('warning'),
+      );
+      node.description = `port ${status.port}`;
+      node.tooltip = 'AlephNet node is not running. Enable it in settings (obotovs.alephnet.enabled).';
+      return [node];
+    }
+
+    const meNode = new ExplorerNode(
+      'Me',
+      vscode.TreeItemCollapsibleState.None,
+      'alephnet-category',
+      undefined,
+      new vscode.ThemeIcon('account'),
+      { command: COMMANDS.ALEPHNET_OPEN_PROFILE, title: 'Open AlephNet Profile' },
+    );
+    meNode.contextValue = 'alephnetProfile';
+
+    const identity = await alephApi.getIdentity();
+    if (identity) {
+      meNode.description = identity.name || identity.nodeId?.slice(0, 12) || '';
+    }
+
+    const friendsNode = new ExplorerNode(
+      'Friends',
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'alephnet-category',
+      undefined,
+      new vscode.ThemeIcon('people'),
+    );
+    friendsNode.contextValue = 'alephnetFriends';
+
+    const groupsNode = new ExplorerNode(
+      'Groups',
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'alephnet-category',
+      undefined,
+      new vscode.ThemeIcon('organization'),
+    );
+    groupsNode.contextValue = 'alephnetGroups';
+
+    const scriptsNode = new ExplorerNode(
+      'Scripts (SRIA)',
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'alephnet-category',
+      undefined,
+      new vscode.ThemeIcon('symbol-misc'),
+    );
+    scriptsNode.contextValue = 'alephnetScripts';
+
+    const networkNode = new ExplorerNode(
+      'Network',
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'alephnet-category',
+      undefined,
+      new vscode.ThemeIcon('remote'),
+    );
+    networkNode.contextValue = 'alephnetNetwork';
+
+    return [meNode, friendsNode, groupsNode, scriptsNode, networkNode];
+  }
+
+  private async getAlephNetCategoryChildren(label: string): Promise<ExplorerNode[]> {
+    switch (label) {
+      case 'Friends':
+        return this.getAlephNetFriends();
+      case 'Groups':
+        return this.getAlephNetGroups();
+      case 'Scripts (SRIA)':
+        return this.getAlephNetScripts();
+      case 'Network':
+        return this.getAlephNetNetwork();
+      default:
+        return [];
+    }
+  }
+
+  private async getAlephNetFriends(): Promise<ExplorerNode[]> {
+    const nodes = await alephApi.getNodes();
+    if (nodes.length === 0) {
+      const empty = new ExplorerNode(
+        'No friends yet',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('circle-outline'),
+      );
+      empty.description = 'Connect to peers on the network';
+      return [empty];
+    }
+    return nodes.map(peer => {
+      const node = new ExplorerNode(
+        peer.name || peer.nodeId?.slice(0, 16) || 'Unknown',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('person'),
+      );
+      node.description = peer.status || peer.address || '';
+      node.tooltip = `Node: ${peer.nodeId}\n${peer.address ? `Address: ${peer.address}` : ''}${peer.lastSeen ? `\nLast seen: ${peer.lastSeen}` : ''}`;
+      node.contextValue = 'alephnetFriend';
+      return node;
+    });
+  }
+
+  private async getAlephNetGroups(): Promise<ExplorerNode[]> {
+    const empty = new ExplorerNode(
+      'No groups yet',
+      vscode.TreeItemCollapsibleState.None,
+      'alephnet-item',
+      undefined,
+      new vscode.ThemeIcon('circle-outline'),
+    );
+    empty.description = 'Groups will appear here';
+    return [empty];
+  }
+
+  private async getAlephNetScripts(): Promise<ExplorerNode[]> {
+    const topics = await alephApi.getLearningTopics();
+    const learningStatus = await alephApi.getLearningStatus();
+
+    const items: ExplorerNode[] = [];
+
+    if (learningStatus) {
+      const statusNode = new ExplorerNode(
+        learningStatus.active ? 'Learning Active' : 'Learning Idle',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        learningStatus.active
+          ? new vscode.ThemeIcon('play-circle', new vscode.ThemeColor('charts.green'))
+          : new vscode.ThemeIcon('circle-outline'),
+      );
+      if (learningStatus.topic) {
+        statusNode.description = learningStatus.topic;
+      }
+      statusNode.contextValue = 'alephnetLearningStatus';
+      items.push(statusNode);
+    }
+
+    if (topics.length === 0 && items.length === 0) {
+      const empty = new ExplorerNode(
+        'No scripts',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('circle-outline'),
+      );
+      empty.description = 'SRIA learning topics appear here';
+      return [empty];
+    }
+
+    for (const t of topics) {
+      const node = new ExplorerNode(
+        t.topic,
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('beaker'),
+      );
+      if (t.progress !== undefined) {
+        node.description = `${Math.round(t.progress * 100)}%`;
+      }
+      node.contextValue = 'alephnetScript';
+      items.push(node);
+    }
+
+    return items;
+  }
+
+  private async getAlephNetNetwork(): Promise<ExplorerNode[]> {
+    const status = await alephApi.getStatus();
+    const nodes = await alephApi.getNodes();
+
+    const items: ExplorerNode[] = [];
+
+    if (status) {
+      const statusNode = new ExplorerNode(
+        'Node Status',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('pulse'),
+      );
+      const conns = status.connections ?? nodes.length;
+      statusNode.description = `${conns} connection${conns === 1 ? '' : 's'}`;
+      if (status.nodeId) {
+        statusNode.tooltip = `Node ID: ${status.nodeId}`;
+      }
+      statusNode.contextValue = 'alephnetNodeStatus';
+      items.push(statusNode);
+    }
+
+    for (const peer of nodes) {
+      const node = new ExplorerNode(
+        peer.name || peer.nodeId?.slice(0, 16) || 'Peer',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('vm'),
+      );
+      node.description = peer.address || peer.status || '';
+      node.tooltip = peer.nodeId || '';
+      node.contextValue = 'alephnetPeer';
+      items.push(node);
+    }
+
+    if (items.length === 0) {
+      const empty = new ExplorerNode(
+        'No peers',
+        vscode.TreeItemCollapsibleState.None,
+        'alephnet-item',
+        undefined,
+        new vscode.ThemeIcon('circle-outline'),
+      );
+      empty.description = 'No network peers connected';
+      return [empty];
+    }
+
+    return items;
   }
 
   dispose() {

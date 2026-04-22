@@ -203,9 +203,60 @@ export async function pullOllamaModel(
 
 // ── OpenAI ──────────────────────────────────────────────────────────
 
+const NON_CHAT_PREFIXES = [
+  'text-embedding', 'embedding',
+  'tts-', 'whisper-', 'dall-e',
+  'davinci', 'babbage', 'ada', 'curie',
+  'text-', 'moderation',
+  'canary-', 'codex-', 'code-',
+];
+
+function isNonChatModel(id: string): boolean {
+  const lower = id.toLowerCase();
+  if (NON_CHAT_PREFIXES.some(p => lower.startsWith(p))) return true;
+  if (lower.includes('instruct')) return true;
+  if (lower === 'gpt-4-base') return true;
+  return false;
+}
+
 async function listOpenAIModels(apiKey?: string): Promise<string[]> {
   if (!apiKey) return [];
-  return listOpenAICompatModels('https://api.openai.com', apiKey);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+
+  const url = 'https://api.openai.com/v1/models';
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      logger.error(`Failed to fetch models from ${url}. Status: ${res.status} ${res.statusText}\nBody: ${text}`);
+      return [];
+    }
+
+    interface OpenAIModel {
+      id: string;
+      capabilities?: Record<string, boolean>;
+      endpoints?: string[];
+    }
+    const data = await res.json() as { data?: OpenAIModel[] };
+    return (data.data ?? [])
+      .filter(m => {
+        if (m.capabilities && 'chat_completions' in m.capabilities) {
+          return m.capabilities.chat_completions;
+        }
+        if (m.endpoints) {
+          return m.endpoints.includes('/v1/chat/completions');
+        }
+        return !isNonChatModel(m.id);
+      })
+      .map(m => m.id)
+      .sort();
+  } catch (err) {
+    logger.error(`Error fetching OpenAI models:`, err);
+    return [];
+  }
 }
 
 // ── OpenAI-compatible (also used by DeepSeek, LM Studio) ───────────
@@ -378,19 +429,27 @@ async function getGcloudProject(): Promise<string | null> {
 async function listAzureModels(apiKey?: string, baseUrl?: string): Promise<string[]> {
   if (!apiKey || !baseUrl) return [];
   const endpoint = baseUrl.replace(/\/+$/, '');
-  const res = await fetch(
-    `${endpoint}/openai/models?api-version=2024-10-21`,
-    {
-      headers: { 'api-key': apiKey },
-      signal: AbortSignal.timeout(5000),
-    },
-  );
-  if (!res.ok) return [];
+  try {
+    const res = await fetch(
+      `${endpoint}/openai/deployments?api-version=2024-10-21`,
+      {
+        headers: { 'api-key': apiKey },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!res.ok) {
+      logger.debug(`Azure deployments list failed: ${res.status} ${res.statusText}`);
+      return [];
+    }
 
-  const data = await res.json() as { data?: Array<{ id: string }> };
-  return (data.data ?? [])
-    .map(m => m.id)
-    .sort();
+    const data = await res.json() as { data?: Array<{ id: string }> };
+    return (data.data ?? [])
+      .map(m => m.id)
+      .sort();
+  } catch (err) {
+    logger.debug('Failed to list Azure deployments', err);
+    return [];
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

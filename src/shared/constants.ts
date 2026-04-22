@@ -25,6 +25,10 @@ export const COMMANDS = {
   EXPLORER_COPY_TASK_RESULT: 'obotovs.explorer.copyTaskResult',
   EXPLORER_RERUN_TASK: 'obotovs.explorer.rerunTask',
   EXPLORER_FOCUS_TASK: 'obotovs.explorer.focusTask',
+  INTERRUPT: 'obotovs.interrupt',
+  // AlephNet explorer commands
+  ALEPHNET_OPEN_PROFILE: 'obotovs.alephnet.openProfile',
+  ALEPHNET_REFRESH: 'obotovs.alephnet.refresh',
 } as const;
 
 export const ENV_KEY_MAP: Record<string, string> = {
@@ -39,11 +43,13 @@ export const ENV_KEY_MAP: Record<string, string> = {
   ollama: '',
   lmstudio: '',
   'vscode-lm': '',
+  openclaw: '',
 };
 
 export const DEFAULT_LOCAL_BASE_URLS: Record<string, string> = {
   ollama: 'http://localhost:11434',
   lmstudio: 'http://localhost:1234',
+  openclaw: 'http://localhost:8099/v1',
 };
 
 export const SESSION_AUTO_SAVE_DEBOUNCE_MS = 2000;

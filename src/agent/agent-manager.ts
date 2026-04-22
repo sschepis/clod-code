@@ -28,6 +28,7 @@ import { buildToolTree, type ToolTreeDeps } from './tool-tree';
 import { logger } from '../shared/logger';
 import { getErrorMessage } from '../shared/errors';
 import type { SkillManager } from '../skills/skill-manager';
+import type { ProjectManager } from '../projects/project-manager';
 
 export interface SpawnOpts {
   task: string;
@@ -68,6 +69,8 @@ export interface AgentManagerConfig {
   bridge: WebviewBridge;
   /** Optional — surfaced in spawned-agent system prompts so they know available skills. */
   skills?: SkillManager;
+  /** Optional — surfaced in spawned-agent system prompts for active project context. */
+  projects?: ProjectManager;
   /** Optional — invoked whenever agent summaries change (spawn, status, cost, etc.). */
   onSummariesChanged?: () => void;
   /**
@@ -109,6 +112,7 @@ export class AgentManager {
   private toolTreeFactory: AgentManagerConfig['toolTreeFactory'];
   private bridge: WebviewBridge;
   private skills?: SkillManager;
+  private projects?: ProjectManager;
   private onSummariesChanged?: () => void;
   private onAgentSpawned?: AgentManagerConfig['onAgentSpawned'];
   private counter = 0;
@@ -119,6 +123,7 @@ export class AgentManager {
     this.toolTreeFactory = config.toolTreeFactory;
     this.bridge = config.bridge;
     this.skills = config.skills;
+    this.projects = config.projects;
     this.onSummariesChanged = config.onSummariesChanged;
     this.onAgentSpawned = config.onAgentSpawned;
   }
@@ -329,6 +334,7 @@ export class AgentManager {
       systemPromptOverride: opts.systemPrompt,
       permissionModeOverride: opts.permissionMode,
       skills: this.skills,
+      projects: this.projects,
       role: opts.role,
     });
 
@@ -644,6 +650,8 @@ export class AgentManager {
       result: result.result,
       error: result.error,
     });
+    // Push full slice so the webview shows the agent's final messages
+    this.bridge.sendSync(agentId);
     this.notifySummariesChanged();
 
     // Resolve any waiters

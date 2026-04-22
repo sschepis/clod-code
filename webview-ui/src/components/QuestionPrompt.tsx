@@ -30,11 +30,11 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
 
   if (status === 'answered') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
           <Check size={14} className="text-emerald-400" />
-          <span className="text-zinc-400">Answered:</span>
-          <span className="text-zinc-200">{answerText ?? (answerIndex !== undefined ? choices[answerIndex] : '')}</span>
+          <span className="text-vscode-desc">Answered:</span>
+          <span className="text-vscode-editorFg">{answerText ?? (answerIndex !== undefined ? choices[answerIndex] : '')}</span>
         </div>
       </div>
     );
@@ -42,10 +42,10 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
 
   if (status === 'cancelled') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
-          <X size={14} className="text-zinc-500" />
-          <span className="text-zinc-500">Question cancelled</span>
+          <X size={14} className="text-vscode-desc" />
+          <span className="text-vscode-desc">Question cancelled</span>
         </div>
       </div>
     );
@@ -53,13 +53,13 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
 
   return (
     <div className="px-6 py-3 ml-4 border-l-2 border-sky-500/40 my-2 fade-in">
-      <div className="bg-zinc-900/60 border border-sky-500/20 rounded-lg p-4 space-y-3">
+      <div role="alertdialog" aria-label="Question from agent" aria-describedby={`q-desc-${promptId}`} className="bg-vscode-widgetBg/60 border border-sky-500/20 rounded-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <HelpCircle size={16} className="text-sky-400" />
           <span className="text-sm font-medium text-sky-300">Question</span>
         </div>
 
-        <div className="text-sm text-zinc-200 whitespace-pre-wrap">{question}</div>
+        <div id={`q-desc-${promptId}`} className="text-sm text-vscode-editorFg whitespace-pre-wrap">{question}</div>
 
         {mode === 'text' ? (
           <textarea
@@ -75,7 +75,7 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
             }}
             placeholder="Type your answer — ⌘/Ctrl-Enter to submit"
             rows={3}
-            className="w-full px-2.5 py-1.5 text-sm bg-zinc-950 border border-zinc-800 rounded text-zinc-100 focus:outline-none focus:border-sky-500/50 font-sans"
+            className="w-full px-2.5 py-1.5 text-sm bg-vscode-editorBg border border-vscode-panelBorder rounded text-vscode-editorFg focus:outline-none focus:border-sky-500/50 font-sans"
           />
         ) : (
           <div className="space-y-1.5">
@@ -83,7 +83,7 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
               <label
                 key={i}
                 className={`flex items-start gap-2 px-2.5 py-1.5 rounded cursor-pointer transition-colors ${
-                  selected === i ? 'bg-sky-500/10 border border-sky-500/30' : 'border border-transparent hover:bg-zinc-800/60'
+                  selected === i ? 'bg-sky-500/10 border border-sky-500/30' : 'border border-transparent hover:bg-vscode-inputBg/60'
                 }`}
               >
                 <input
@@ -93,7 +93,7 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
                   onChange={() => setSelected(i)}
                   className="mt-0.5 accent-sky-500"
                 />
-                <span className="text-sm text-zinc-200 flex-1">{choice}</span>
+                <span className="text-sm text-vscode-editorFg flex-1">{choice}</span>
               </label>
             ))}
           </div>
@@ -110,13 +110,13 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
               }
             }}
             disabled={mode === 'text' && !textValue.trim()}
-            className="px-3 py-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded transition-colors"
+            className="px-3 py-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-vscode-inputBg disabled:text-vscode-desc text-white rounded transition-colors"
           >
             Submit
           </button>
           <button
             onClick={() => onRespond(promptId, { cancelled: true })}
-            className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
+            className="px-3 py-1.5 text-xs font-medium bg-vscode-inputBg hover:bg-vscode-hoverBg text-vscode-editorFg rounded transition-colors"
           >
             Cancel
           </button>

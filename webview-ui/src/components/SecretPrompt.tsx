@@ -26,12 +26,12 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
 
   if (status === 'answered') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
           <Check size={14} className="text-emerald-400" />
-          <span className="text-zinc-400">Secret provided:</span>
-          <span className="font-mono text-zinc-200">{name}</span>
-          <span className="text-zinc-500">
+          <span className="text-vscode-desc">Secret provided:</span>
+          <span className="font-mono text-vscode-editorFg">{name}</span>
+          <span className="text-vscode-desc">
             {savedToFile ? '— saved to .env' : '— session only'}
           </span>
         </div>
@@ -41,11 +41,11 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
 
   if (status === 'cancelled') {
     return (
-      <div className="px-6 py-2 ml-4 border-l-2 border-zinc-800/60 my-1 fade-in">
+      <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
         <div className="flex items-center gap-2 text-xs">
-          <X size={14} className="text-zinc-500" />
-          <span className="text-zinc-500">Secret request cancelled</span>
-          <span className="font-mono text-zinc-600">{name}</span>
+          <X size={14} className="text-vscode-desc" />
+          <span className="text-vscode-desc">Secret request cancelled</span>
+          <span className="font-mono text-vscode-disabled">{name}</span>
         </div>
       </div>
     );
@@ -58,18 +58,18 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
 
   return (
     <div className="px-6 py-3 ml-4 border-l-2 border-amber-500/40 my-2 fade-in">
-      <div className="bg-zinc-900/60 border border-amber-500/20 rounded-lg p-4 space-y-3">
+      <div className="bg-vscode-widgetBg/60 border border-amber-500/20 rounded-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <KeyRound size={16} className="text-amber-400" />
           <span className="text-sm font-medium text-amber-300">Secret Requested</span>
         </div>
 
         <div className="text-sm">
-          <div className="text-zinc-200">
+          <div className="text-vscode-editorFg">
             <span className="font-mono text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded">{name}</span>
           </div>
           {description && (
-            <p className="mt-1.5 text-zinc-400">{description}</p>
+            <p className="mt-1.5 text-vscode-desc">{description}</p>
           )}
         </div>
 
@@ -84,19 +84,19 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
             }}
             placeholder="Enter secret value"
             autoFocus
-            className="w-full px-3 py-2 pr-9 text-sm font-mono bg-zinc-950 border border-zinc-800 rounded text-zinc-100 focus:outline-none focus:border-amber-500/50"
+            className="w-full px-3 py-2 pr-9 text-sm font-mono bg-vscode-editorBg border border-vscode-panelBorder rounded text-vscode-editorFg focus:outline-none focus:border-amber-500/50"
           />
           <button
             type="button"
             onClick={() => setRevealed((r) => !r)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-vscode-desc hover:text-vscode-editorFg"
             aria-label={revealed ? 'Hide' : 'Show'}
           >
             {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+        <label className="flex items-center gap-2 text-xs text-vscode-desc cursor-pointer">
           <input
             type="checkbox"
             checked={saveToFile}
@@ -104,7 +104,7 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
             className="accent-amber-500"
           />
           <span>
-            Save to <span className="font-mono text-zinc-300">{envPath}</span>
+            Save to <span className="font-mono text-vscode-editorFg">{envPath}</span>
           </span>
         </label>
 
@@ -112,13 +112,13 @@ export const SecretPrompt: React.FC<SecretPromptProps> = ({
           <button
             onClick={submit}
             disabled={!value}
-            className="px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded transition-colors"
+            className="px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-vscode-inputBg disabled:text-vscode-desc text-white rounded transition-colors"
           >
             Submit
           </button>
           <button
             onClick={() => onRespond(promptId, { cancelled: true })}
-            className="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
+            className="px-3 py-1.5 text-xs font-medium bg-vscode-inputBg hover:bg-vscode-hoverBg text-vscode-editorFg rounded transition-colors"
           >
             Cancel
           </button>

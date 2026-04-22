@@ -5,8 +5,7 @@
 
 // ── Event types flowing through the UI ────────────────────────────────
 
-export type EventRole = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'narrative' | 'permission' | 'question' | 'secret_request' | 'peer_dispatch_request';
-
+export type EventRole = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'narrative' | 'permission' | 'question' | 'secret_request' | 'peer_dispatch_request' | 'plan_approval';
 export interface BaseEvent {
   id: string;
   role: EventRole;
@@ -94,6 +93,17 @@ export interface PeerDispatchRequestEvent extends BaseEvent {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+export type PlanApprovalMode = 'auto' | 'manual';
+
+export interface PlanApprovalEvent extends BaseEvent {
+  role: 'plan_approval';
+  promptId: string;
+  planSummary: string;
+  planFilePath: string;
+  status: 'pending' | 'approved' | 'denied';
+  approvalMode?: PlanApprovalMode;
+}
+
 export type SessionEvent =
   | UserEvent
   | AssistantEvent
@@ -104,7 +114,8 @@ export type SessionEvent =
   | PermissionEvent
   | QuestionEvent
   | SecretRequestEvent
-  | PeerDispatchRequestEvent;
+  | PeerDispatchRequestEvent
+  | PlanApprovalEvent;
 
 export interface Attachment {
   id: number;
@@ -205,6 +216,16 @@ export interface SkillInfo {
   filePath: string;
 }
 
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  activePlanCount: number;
+  taskCount: number;
+  filePath: string;
+}
+
 export type MemoryScope = 'global' | 'project' | 'conversation';
 
 export interface MemoryInfo {
@@ -234,6 +255,7 @@ export interface ObjectSnapshot {
   skills: SkillInfo[];
   memories: MemoryInfo[];
   conversations: ConversationInfo[];
+  projects: ProjectInfo[];
 }
 
 export type ObjectCategory =
@@ -242,7 +264,8 @@ export type ObjectCategory =
   | 'skill'
   | 'agent'
   | 'memory'
-  | 'conversation';
+  | 'conversation'
+  | 'project';
 
 export type ObjectActionKind = 'open' | 'delete' | 'reveal';
 
@@ -260,6 +283,10 @@ export interface OutboundDispatchUi {
   error?: string;
   reason?: string;
 }
+
+// ── Routing mode ────────────────────────────────────────────────────────
+
+export type RoutingMode = 'dual' | 'local-only' | 'remote-only';
 
 // ── Model / provider info ─────────────────────────────────────────────
 
@@ -293,12 +320,12 @@ export interface PickerProviderInfo {
  * single-agent path.
  */
 export type ExtToWebviewMessage =
-  | { type: 'sync'; agentId?: string; events: SessionEvent[]; phase: PhaseState; cost: CostState; activeModel: ModelInfo; mode: 'act' | 'plan'; agents?: AgentSummary[]; focusedAgentId?: string }
+  | { type: 'sync'; agentId?: string; events: SessionEvent[]; phase: PhaseState; cost: CostState; activeModel: ModelInfo; triageModel?: ModelInfo; routingMode?: RoutingMode; mode: 'act' | 'plan'; agents?: AgentSummary[]; focusedAgentId?: string }
   | { type: 'event'; agentId?: string; event: SessionEvent }
   | { type: 'token'; agentId?: string; text: string; eventId: string }
   | { type: 'phase'; agentId?: string; phase: AgentPhase; message: string }
   | { type: 'cost_update'; agentId?: string; cost: CostState }
-  | { type: 'model_changed'; agentId?: string; model: ModelInfo }
+  | { type: 'model_changed'; agentId?: string; model: ModelInfo; triageModel?: ModelInfo; routingMode?: RoutingMode }
   | { type: 'tool_status'; agentId?: string; eventId: string; status: 'running' | 'success' | 'error'; output?: string; duration?: string }
   | { type: 'permission_request'; agentId?: string; eventId: string; toolName: string; toolInput: string; description: string }
   | { type: 'permission_resolved'; agentId?: string; eventId: string; status: 'allowed' | 'denied' }
@@ -308,6 +335,8 @@ export type ExtToWebviewMessage =
   | { type: 'ask_secret_resolved'; agentId?: string; promptId: string; status: 'answered' | 'cancelled'; savedToFile?: boolean }
   | { type: 'peer_dispatch_request'; agentId?: string; promptId: string; fromWindowId: string; task: string; label: string }
   | { type: 'peer_dispatch_resolved'; agentId?: string; promptId: string; status: 'approved' | 'rejected' }
+  | { type: 'plan_approval_request'; agentId?: string; promptId: string; planSummary: string; planFilePath: string }
+  | { type: 'plan_approval_resolved'; agentId?: string; promptId: string; status: 'approved' | 'denied'; approvalMode?: PlanApprovalMode }
   | { type: 'title_changed'; agentId?: string; title: string }
   | { type: 'clear'; agentId?: string }
   | { type: 'slash_commands'; commands: SlashCommandInfo[] }
@@ -340,7 +369,9 @@ export type WebviewToExtMessage =
   | { type: 'ask_question_response'; agentId?: string; promptId: string; cancelled?: boolean; answerIndex?: number; answerText?: string }
   | { type: 'ask_secret_response'; agentId?: string; promptId: string; cancelled?: boolean; value?: string; saveToFile?: boolean }
   | { type: 'peer_dispatch_response'; agentId?: string; promptId: string; approved: boolean }
-  | { type: 'change_model'; agentId?: string; provider: string; model: string }
+  | { type: 'plan_approval_response'; agentId?: string; promptId: string; denied?: boolean; approvalMode?: PlanApprovalMode }
+  | { type: 'change_model'; agentId?: string; provider: string; model: string; role?: 'triage' | 'executor' | 'coder' }
+  | { type: 'change_routing_mode'; agentId?: string; mode: RoutingMode }
   | { type: 'clear_session'; agentId?: string }
   | { type: 'revert'; agentId?: string; eventId: string }
   | { type: 'delete_event'; agentId?: string; eventId: string }
@@ -392,7 +423,7 @@ export interface SettingsRouteAssignment {
 
 export interface SettingsState {
   providers: Record<string, SettingsProviderConfig>;
-  routing: Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer', SettingsRouteAssignment>>;
+  routing: Partial<Record<'triage' | 'executor' | 'planner' | 'summarizer' | 'coder', SettingsRouteAssignment>>;
   triageEnabled: boolean;
   permissionMode: 'readonly' | 'workspace-write' | 'full-access' | 'prompt';
   maxIterations: number;
@@ -420,6 +451,8 @@ export interface ProviderOption {
   availableModels?: string[];
   /** For the managed provider: whether the backing service (Ollama) is reachable. */
   serviceRunning?: boolean;
+  /** Persisted result from the last connection test. */
+  lastTestResult?: { success: boolean; message: string };
 }
 
 export type SettingsExtToWebview =
@@ -432,7 +465,7 @@ export type SettingsExtToWebview =
 export type SettingsWebviewToExt =
   | { type: 'ready' }
   | { type: 'save'; settings: Partial<SettingsState> }
-  | { type: 'test_connection'; providerId: string; model: string }
+  | { type: 'test_connection'; providerId: string; model: string; config?: SettingsProviderConfig }
   | { type: 'pull_model'; model: string }
   | { type: 'reset_to_defaults' }
   | { type: 'open_logs' };

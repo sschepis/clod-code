@@ -3,9 +3,10 @@ import { COMMANDS } from '../shared/constants';
 import type { Orchestrator } from '../agent/orchestrator';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ChatPanelManager } from './chat-panel-manager';
-import type { ExplorerNode } from './explorer-provider';
+import type { ExplorerNode, ExplorerProvider } from './explorer-provider';
 import { PROVIDERS } from '../config/provider-registry';
 import { SettingsPanel } from './settings-panel';
+import { openAlephNetProfile } from './alephnet-panel';
 import { logger } from '../shared/logger';
 
 /**
@@ -18,7 +19,12 @@ export function registerCommands(
   orchestrator: Orchestrator | undefined,
   sidebar: SidebarProvider | undefined,
   chatPanelManager?: ChatPanelManager,
+  explorerProvider?: ExplorerProvider,
 ): void {
+  // Restore persisted provider test results so the settings UI
+  // shows green/orange/red indicators from the previous session.
+  SettingsPanel.initialize(context);
+
   // ── Always-available commands ────────────────────────────────────
 
   // Open settings panel — always works
@@ -59,6 +65,14 @@ export function registerCommands(
         return;
       }
       sidebar.focus();
+    })
+  );
+
+  // Interrupt / stop agent — always available, no-op if nothing is running
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.INTERRUPT, () => {
+      if (!orchestrator) return;
+      orchestrator.interrupt();
     })
   );
 
@@ -210,6 +224,20 @@ export function registerCommands(
       if (selected) {
         chatPanelManager.getPanel(selected.panelId)?.reveal();
       }
+    })
+  );
+
+  // ── AlephNet commands ────────────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.ALEPHNET_OPEN_PROFILE, () => {
+      openAlephNetProfile(context.extensionUri);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.ALEPHNET_REFRESH, () => {
+      explorerProvider?.refresh();
     })
   );
 

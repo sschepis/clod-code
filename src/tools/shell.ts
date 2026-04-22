@@ -13,7 +13,7 @@ function resolveShell(deps: ShellDeps): string {
 export function createShellRunHandler(deps: ShellDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const cmd = String(kwargs.cmd || kwargs.command || '');
-    if (!cmd) return '[ERROR] Missing required argument: cmd';
+    if (!cmd) return '[ERROR] Missing required argument: cmd. Provide a shell command to execute (e.g. "npm test", "cargo build").';
 
     const timeoutMs = typeof kwargs.timeout === 'number' ? kwargs.timeout : 30_000;
     const cwd = String(kwargs.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd());

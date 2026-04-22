@@ -34,7 +34,7 @@ let tinyalephMod: TinyalephMod | null = null;
 async function loadKuramoto(): Promise<TinyalephMod> {
   if (tinyalephMod) return tinyalephMod;
   try {
-    tinyalephMod = (await import(/* webpackIgnore: true */ '@aleph-ai/tinyaleph')) as TinyalephMod;
+    tinyalephMod = (await import(/* webpackIgnore: true */ '@aleph-ai/tinyaleph')) as unknown as TinyalephMod;
   } catch {
     tinyalephMod = (await esmImport('@aleph-ai/tinyaleph')) as TinyalephMod;
   }

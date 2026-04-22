@@ -19,6 +19,7 @@ import type { Router } from '@sschepis/swiss-army-tool';
 import type { ObotovsSettings, PromptRole } from '../config/settings';
 import type { ModelInfo } from '../shared/message-types';
 import type { SkillManager } from '../skills/skill-manager';
+import type { ProjectManager } from '../projects/project-manager';
 import { DEFAULT_MODEL_PRICING, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_PRESERVE_RECENT_MESSAGES } from '../config/defaults';
 import { createProviders, resolveRole } from './providers';
 import { buildSystemPrompt } from './system-prompt';
@@ -27,6 +28,7 @@ import { logger } from '../shared/logger';
 import { dynamicImport } from '../shared/dynamic-import';
 import { getErrorMessage } from '../shared/errors';
 import { getProviderMeta } from '../config/provider-registry';
+import { getSpinnerMessage } from './spinner-messages';
 
 // ── UI-neutral event types ─────────────────────────────────────────────
 
@@ -38,13 +40,21 @@ export type HostEvent =
   | { type: 'tool_start'; command: string; kwargs?: Record<string, unknown> }
   | { type: 'tool_complete'; command: string; result?: string; error?: string; durationMs?: number }
   | { type: 'tool_round'; narrative: string; iteration: number; totalToolCalls: number }
+  | { type: 'commentary'; text: string }
   | { type: 'turn_complete'; iterations?: number; toolCalls?: number; usage?: unknown }
   | { type: 'cost'; totalTokens: number; totalCost: number }
   | { type: 'permission_denied'; toolName: string; toolInput: string; reason: string }
   | { type: 'error'; message: string }
   | { type: 'doom_loop'; reason: string; command: string }
-  | { type: 'initialized'; model: ModelInfo }
+  | { type: 'initialized'; model: ModelInfo; triageModel?: ModelInfo }
   | { type: 'disposed' };
+
+interface ToolSnapshot {
+  command: string;
+  target: string;
+  result: string;
+  success: boolean;
+}
 
 export type HostEventListener = (event: HostEvent) => void;
 
@@ -63,6 +73,8 @@ export interface AgentHostConfig {
   permissionModeOverride?: PermissionModeLabel;
   /** Optional skill manager — when provided, skills are listed in the system prompt. */
   skills?: SkillManager;
+  /** Optional project manager — when provided, active project context is appended. */
+  projects?: ProjectManager;
   /** Routing role — controls which provider/model is used from the routing config. */
   role?: PromptRole;
 }
@@ -79,11 +91,21 @@ export class AgentHost {
   private systemPromptOverride?: string;
   private permissionModeOverride?: PermissionModeLabel;
   private skills?: SkillManager;
+  private projects?: ProjectManager;
   private role?: PromptRole;
   private activeModel: ModelInfo;
+  private triageModel: ModelInfo | undefined;
   private disposed = false;
   private listeners = new Set<HostEventListener>();
   private pendingInput: string | null = null;
+
+  // ── Commentary engine state ──
+  private localProvider?: import('@sschepis/llm-wrapper').BaseProvider;
+  private localModelName?: string;
+  private toolLog: ToolSnapshot[] = [];
+  private consecutiveSilentRounds = 0;
+  private commentaryInFlight = false;
+  private lastUserInput = '';
 
   constructor(config: AgentHostConfig) {
     this.id = config.id;
@@ -93,8 +115,10 @@ export class AgentHost {
     this.systemPromptOverride = config.systemPromptOverride;
     this.permissionModeOverride = config.permissionModeOverride;
     this.skills = config.skills;
+    this.projects = config.projects;
     this.role = config.role;
     this.activeModel = this.computeActiveModel();
+    this.triageModel = this.computeTriageModel();
   }
 
   /** Subscribe to host events. Returns an unsubscribe function. */
@@ -118,6 +142,14 @@ export class AgentHost {
     await this.createAgent(session);
   }
 
+  /** Recreate the agent with a fresh (empty) session, discarding history. */
+  async recreateClean(newSettings?: ObotovsSettings): Promise<void> {
+    if (this.disposed) return;
+    if (newSettings) this.settings = newSettings;
+    this.teardownAgent();
+    await this.createAgent(undefined);
+  }
+
   /** Submit user or task input to the agent. */
   async submit(text: string, attachments?: any[]): Promise<void> {
     if (!this.agent) {
@@ -129,12 +161,47 @@ export class AgentHost {
       logger.info(`AgentHost "${this.id}": queued input while processing`);
       return;
     }
-    await this.agent.submitInput(text, attachments);
+    this.lastUserInput = text;
+    this.toolLog = [];
+    this.consecutiveSilentRounds = 0;
+    await this.agent.submitInput(text);
   }
 
   async interrupt(): Promise<void> {
     if (!this.agent) return;
     await this.agent.interrupt();
+    if (this.isProcessing) {
+      await this.forceStopAfterTimeout(2000);
+    }
+  }
+
+  private forceStopAfterTimeout(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const interval = 200;
+      let elapsed = 0;
+
+      const poll = setInterval(() => {
+        elapsed += interval;
+        if (!this.isProcessing || !this.agent) {
+          clearInterval(poll);
+          resolve();
+          return;
+        }
+        if (elapsed >= timeoutMs) {
+          clearInterval(poll);
+          logger.info(`AgentHost "${this.id}": force-stopping after ${timeoutMs}ms`);
+          const session = this.agent?.getSession();
+          this.pendingInput = null;
+          this.teardownAgent();
+          this.emit({ type: 'turn_complete' });
+          this.createAgent(session).catch((err) => {
+            logger.error(`AgentHost "${this.id}": failed to recreate after force-stop`, err);
+            this.emit({ type: 'error', message: getErrorMessage(err) });
+          });
+          resolve();
+        }
+      }, interval);
+    });
   }
 
   getSession(): Session | undefined {
@@ -145,8 +212,16 @@ export class AgentHost {
     this.router = router;
   }
 
+  getRouter(): Router {
+    return this.router;
+  }
+
   getActiveModel(): ModelInfo {
     return this.activeModel;
+  }
+
+  getTriageModel(): ModelInfo | undefined {
+    return this.triageModel;
   }
 
   getCostSummary() {
@@ -183,13 +258,17 @@ export class AgentHost {
       >('@sschepis/oboto-agent');
 
       this.activeModel = this.computeActiveModel();
+      this.triageModel = this.computeTriageModel();
 
       const providers = await createProviders(this.settings, this.role);
+      this.localProvider = providers.local;
+      this.localModelName = providers.localModelName;
       const systemPrompt =
         this.systemPromptOverride ??
         buildSystemPrompt({
           instructionFileName: this.settings.instructionFile,
           skills: this.skills,
+          projects: this.projects,
         });
       const session = existingSession ?? createEmptySession();
 
@@ -197,11 +276,11 @@ export class AgentHost {
       this.permissionPolicy = createPermissionPolicy(permMode);
 
       this.agent = new ObotoAgent({
-        localModel: providers.local,
-        remoteModel: providers.remote,
+        localModel: providers.local as any,
+        remoteModel: providers.remote as any,
         localModelName: providers.localModelName,
         remoteModelName: providers.remoteModelName,
-        router: this.router,
+        router: this.router as any,
         session,
         systemPrompt,
         maxIterations: this.settings.maxIterations,
@@ -222,7 +301,8 @@ export class AgentHost {
       this.wireEvents();
 
       this.activeModel = { ...this.activeModel, ready: true };
-      this.emit({ type: 'initialized', model: this.activeModel });
+      if (this.triageModel) this.triageModel = { ...this.triageModel, ready: true };
+      this.emit({ type: 'initialized', model: this.activeModel, triageModel: this.triageModel });
 
       logger.info(`AgentHost "${this.id}" initialized`, {
         triageModel: providers.localModelName,
@@ -239,9 +319,11 @@ export class AgentHost {
     if (!this.agent) return;
     const a = this.agent;
 
+    const SPINNER_PHASES = new Set(['thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory']);
     a.on('phase', (e) => {
       const p = e.payload as { phase: string; message: string };
-      this.emit({ type: 'phase', phase: p.phase, message: p.message });
+      const message = SPINNER_PHASES.has(p.phase) ? getSpinnerMessage() : p.message;
+      this.emit({ type: 'phase', phase: p.phase, message });
     });
 
     a.on('triage_result', (e) => {
@@ -252,6 +334,7 @@ export class AgentHost {
     a.on('agent_thought', (e) => {
       const p = e.payload as { text: string; model?: string; iteration?: number };
       if (!p?.text) return;
+      this.consecutiveSilentRounds = 0;
       this.emit({ type: 'thought', text: p.text, model: p.model, iteration: p.iteration });
     });
 
@@ -261,7 +344,14 @@ export class AgentHost {
     });
 
     a.on('tool_execution_complete', (e) => {
-      const p = e.payload as { command: string; result?: string; error?: string; durationMs?: number };
+      const p = e.payload as { command: string; result?: string; error?: string; durationMs?: number; kwargs?: Record<string, unknown> };
+      this.toolLog.push({
+        command: String(p.command),
+        target: this.extractTarget(p.kwargs),
+        result: (p.result || p.error || '').slice(0, 200),
+        success: !p.error,
+      });
+      if (this.toolLog.length > 12) this.toolLog.shift();
       this.emit({
         type: 'tool_complete',
         command: String(p.command),
@@ -273,12 +363,16 @@ export class AgentHost {
 
     a.on('tool_round_complete', (e) => {
       const p = e.payload as { narrative: string; iteration: number; totalToolCalls: number };
+      this.consecutiveSilentRounds++;
       this.emit({
         type: 'tool_round',
         narrative: p.narrative,
         iteration: p.iteration,
         totalToolCalls: p.totalToolCalls,
       });
+      if (this.consecutiveSilentRounds >= 2 && !this.commentaryInFlight) {
+        this.requestCommentary(p.iteration, p.totalToolCalls);
+      }
     });
 
     a.on('turn_complete', (e) => {
@@ -334,6 +428,63 @@ export class AgentHost {
     });
   }
 
+  // ── Commentary engine ─────────────────────────────────────────────────
+
+  private requestCommentary(iteration: number, totalToolCalls: number): void {
+    if (!this.localProvider || !this.localModelName) return;
+    this.commentaryInFlight = true;
+    const frame = this.buildStateFrame(iteration, totalToolCalls);
+    const provider = this.localProvider;
+    const model = this.localModelName;
+
+    provider.chat({
+      model,
+      messages: [
+        {
+          role: 'system' as const,
+          content: 'You are an AI coding assistant narrating your own work in first person. Given a state frame, write ONE concise sentence in first person (starting with "I am" or "I\'m") explaining what you are doing and why. Name specific files, functions, or patterns. Do not describe tools — describe the work. No preamble.',
+        },
+        { role: 'user' as const, content: frame },
+      ],
+      max_tokens: 120,
+      temperature: 0.3,
+    }).then((res) => {
+      this.commentaryInFlight = false;
+      const text = (res?.choices?.[0]?.message?.content as string)?.trim();
+      if (text && this.isProcessing) {
+        this.consecutiveSilentRounds = 0;
+        this.emit({ type: 'commentary', text });
+      }
+    }).catch((err) => {
+      this.commentaryInFlight = false;
+      logger.debug(`AgentHost "${this.id}": commentary failed`, err);
+    });
+  }
+
+  private buildStateFrame(iteration: number, totalToolCalls: number): string {
+    const lines: string[] = [];
+    lines.push(`User request: ${this.lastUserInput.slice(0, 300)}`);
+    lines.push(`Iteration: ${iteration}, Total tool calls: ${totalToolCalls}`);
+    lines.push('Recent activity:');
+    for (const t of this.toolLog) {
+      const status = t.success ? 'ok' : 'ERROR';
+      lines.push(`  ${t.command}${t.target ? ' ' + t.target : ''} [${status}] → ${t.result.slice(0, 100)}`);
+    }
+    return lines.join('\n');
+  }
+
+  private extractTarget(kwargs?: Record<string, unknown>): string {
+    if (!kwargs) return '';
+    const p = (kwargs.path ?? kwargs.file ?? kwargs.filePath ?? kwargs.file_path ?? '') as string;
+    if (p) {
+      const parts = p.split('/');
+      return parts.length > 2 ? parts.slice(-2).join('/') : parts[parts.length - 1];
+    }
+    const q = (kwargs.pattern ?? kwargs.query ?? kwargs.cmd ?? '') as string;
+    if (q) return String(q).slice(0, 50);
+    return '';
+  }
+
   private teardownAgent(): void {
     try {
       this.agent?.removeAllListeners?.();
@@ -372,6 +523,23 @@ export class AgentHost {
         isLocal: false,
         ready: false,
       };
+    }
+  }
+
+  private computeTriageModel(): ModelInfo | undefined {
+    if (!this.settings.triageEnabled) return undefined;
+    try {
+      const resolved = resolveRole('triage', this.settings);
+      const providerMeta = getProviderMeta(resolved.providerType);
+      return {
+        provider: resolved.providerId,
+        providerDisplayName: providerMeta?.displayName ?? resolved.providerId,
+        model: resolved.model,
+        isLocal: providerMeta?.isLocal ?? false,
+        ready: false,
+      };
+    } catch {
+      return undefined;
     }
   }
 
