@@ -12,6 +12,7 @@ const AUTO_EXPAND_TOOLS = new Set([
   'bash', 'terminal',
   'git diff', 'git log',
   'git review', 'git review-uncommitted',
+  'web browse', 'web screenshot',
 ]);
 
 /** Strip a practical subset of ANSI escape sequences:
@@ -44,7 +45,12 @@ interface ToolBlockProps {
 }
 
 function summarizeKwargs(command: string, kwargs?: Record<string, unknown>): string {
-  if (!kwargs || Object.keys(kwargs).length === 0) return '';
+  if (!kwargs) return '';
+  // Guard: kwargs sometimes arrives as a JSON string instead of a parsed object
+  if (typeof kwargs === 'string') {
+    try { kwargs = JSON.parse(kwargs); } catch { return ''; }
+  }
+  if (typeof kwargs !== 'object' || kwargs === null || Object.keys(kwargs).length === 0) return '';
   const cmd = kwargs.command;
   if (typeof cmd === 'string') return cmd;
   const path = kwargs.path ?? kwargs.file_path;
@@ -89,6 +95,14 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   'git review-uncommitted': <GitBranch size={14} className="text-orange-400" />,
   'workspace diagnostics': <AlertTriangle size={14} className="text-yellow-400" />,
   web_search: <Globe size={14} className="text-teal-400" />,
+  'web search': <Globe size={14} className="text-teal-400" />,
+  'web fetch': <Globe size={14} className="text-teal-400" />,
+  'web browse': <Globe size={14} className="text-teal-400" />,
+  'web click': <Globe size={14} className="text-teal-400" />,
+  'web type': <Globe size={14} className="text-teal-400" />,
+  'web screenshot': <Globe size={14} className="text-teal-400" />,
+  'web eval': <Globe size={14} className="text-teal-400" />,
+  'web close': <Globe size={14} className="text-teal-400" />,
 };
 
 export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, status, output, duration, kwargs, onRevert }) => {
@@ -98,6 +112,17 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
   const icon = TOOL_ICONS[toolName] || TOOL_ICONS[command] || <Terminal size={14} className="text-vscode-desc" />;
 
   const cleanOutput = useMemo(() => (output ? stripAnsi(output) : ''), [output]);
+
+  const { images, textOutput } = useMemo(() => {
+    const imgPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+    const imgs: { alt: string; src: string }[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = imgPattern.exec(cleanOutput)) !== null) {
+      imgs.push({ alt: match[1], src: match[2] });
+    }
+    const text = cleanOutput.replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
+    return { images: imgs, textOutput: text };
+  }, [cleanOutput]);
 
   const statusIcon = (() => {
     if (status === 'running') return <Loader2 size={14} className="text-vscode-desc animate-spin" />;
@@ -142,17 +167,31 @@ export const ToolBlock: React.FC<ToolBlockProps> = ({ id, toolName, command, sta
 
       {isExpanded && output && (
         <div className="mt-2 ml-8 mr-4 mb-2">
-          <div className="bg-[#0c0c0c] border border-vscode-panelBorder rounded-md overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-1.5 bg-vscode-widgetBg/80 border-b border-vscode-panelBorder">
-              <span className="text-xs text-vscode-desc font-mono">Output</span>
-              <span className="text-[10px] text-vscode-disabled font-mono">
-                {cleanOutput.split('\n').length} lines · {cleanOutput.length} chars
-              </span>
+          {images.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.src}
+                  alt={img.alt}
+                  className="rounded-md max-w-full border border-vscode-panelBorder shadow-md"
+                />
+              ))}
             </div>
-            <pre className="p-3 text-xs font-mono text-vscode-editorFg overflow-x-auto whitespace-pre leading-relaxed max-h-[480px] overflow-y-auto">
-              <code>{cleanOutput}</code>
-            </pre>
-          </div>
+          )}
+          {textOutput && (
+            <div className="bg-[#0c0c0c] border border-vscode-panelBorder rounded-md overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-vscode-widgetBg/80 border-b border-vscode-panelBorder">
+                <span className="text-xs text-vscode-desc font-mono">Output</span>
+                <span className="text-[10px] text-vscode-disabled font-mono">
+                  {textOutput.split('\n').length} lines · {textOutput.length} chars
+                </span>
+              </div>
+              <pre className="p-3 text-xs font-mono text-vscode-editorFg overflow-x-auto whitespace-pre leading-relaxed max-h-[480px] overflow-y-auto">
+                <code>{textOutput}</code>
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

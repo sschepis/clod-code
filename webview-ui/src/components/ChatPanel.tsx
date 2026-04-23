@@ -18,6 +18,7 @@ interface ChatPanelProps {
   isProcessing: boolean;
   onRevert: (eventId: string) => void;
   onEdit: (eventId: string, content: string) => void;
+  onRerun: (eventId: string, content: string) => void;
   onDelete: (eventId: string) => void;
   onPermissionRespond: (eventId: string, allowed: boolean, remember: boolean) => void;
   onQuestionRespond: (promptId: string, response: { cancelled?: boolean; answerIndex?: number; answerText?: string }) => void;
@@ -27,7 +28,7 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
-  events, phase, isProcessing, onRevert, onEdit, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond, onPlanApprovalRespond,
+  events, phase, isProcessing, onRevert, onEdit, onRerun, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond, onPlanApprovalRespond,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -50,6 +51,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             attachments={event.attachments}
             onRevert={onRevert}
             onEdit={onEdit}
+            onRerun={onRerun}
             onDelete={onDelete}
           />
         );
@@ -62,6 +64,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             content={event.content}
             timestamp={event.timestamp}
             model={event.model}
+            agentName={event.agentName}
             onRevert={onRevert}
             onDelete={onDelete}
           />

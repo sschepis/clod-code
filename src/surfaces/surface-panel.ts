@@ -36,6 +36,8 @@ export interface SurfacePanelOptions {
   onSubmitToAgent?: (text: string, agentId?: string) => void;
   /** Called when the surface requests to execute a tool. */
   onExecuteTool?: (tool: string, kwargs: Record<string, unknown>) => Promise<any>;
+  /** Called when this surface's webview becomes the active panel. */
+  onDidBecomeActive?: () => void;
 }
 
 /**
@@ -71,6 +73,10 @@ export class SurfacePanel {
     this.panel.onDidDispose(() => {
       this.disposed = true;
       opts.onDispose();
+    });
+
+    this.panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.active) opts.onDidBecomeActive?.();
     });
 
     
@@ -119,6 +125,7 @@ export class SurfacePanel {
   }
 
   get name(): string { return this.opts.name; }
+  get filePath(): string { return this.opts.filePath; }
 
   setRoutesUrl(url: string | null): void {
     if (this.disposed) return;

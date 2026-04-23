@@ -22,6 +22,7 @@ import type { SkillManager } from '../skills/skill-manager';
 import type { ProjectManager } from '../projects/project-manager';
 import { DEFAULT_MODEL_PRICING, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_PRESERVE_RECENT_MESSAGES } from '../config/defaults';
 import { createProviders, resolveRole } from './providers';
+import { createDWIMProvider } from './dwim-provider';
 import { buildSystemPrompt } from './system-prompt';
 import { createPermissionPolicy, type PermissionModeLabel } from './permission-prompter';
 import { logger } from '../shared/logger';
@@ -208,6 +209,10 @@ export class AgentHost {
     return this.agent?.getSession();
   }
 
+  async syncSession(session: Session): Promise<void> {
+    await this.agent?.syncSession(session);
+  }
+
   setRouter(router: Router): void {
     this.router = router;
   }
@@ -261,8 +266,9 @@ export class AgentHost {
       this.triageModel = this.computeTriageModel();
 
       const providers = await createProviders(this.settings, this.role);
-      this.localProvider = providers.local;
+      this.localProvider = createDWIMProvider(providers.local);
       this.localModelName = providers.localModelName;
+      const remoteProvider = createDWIMProvider(providers.remote);
       const systemPrompt =
         this.systemPromptOverride ??
         buildSystemPrompt({
@@ -276,8 +282,8 @@ export class AgentHost {
       this.permissionPolicy = createPermissionPolicy(permMode);
 
       this.agent = new ObotoAgent({
-        localModel: providers.local as any,
-        remoteModel: providers.remote as any,
+        localModel: this.localProvider as any,
+        remoteModel: remoteProvider as any,
         localModelName: providers.localModelName,
         remoteModelName: providers.remoteModelName,
         router: this.router as any,
@@ -339,8 +345,12 @@ export class AgentHost {
     });
 
     a.on('tool_execution_start', (e) => {
-      const p = e.payload as { command: string; kwargs?: Record<string, unknown> };
-      this.emit({ type: 'tool_start', command: String(p.command), kwargs: p.kwargs });
+      const p = e.payload as { command: string; kwargs?: Record<string, unknown> | string };
+      let kwargs = p.kwargs;
+      if (typeof kwargs === 'string') {
+        try { kwargs = JSON.parse(kwargs); } catch { kwargs = undefined; }
+      }
+      this.emit({ type: 'tool_start', command: String(p.command), kwargs: kwargs as Record<string, unknown> | undefined });
     });
 
     a.on('tool_execution_complete', (e) => {
@@ -409,6 +419,12 @@ export class AgentHost {
       const p = e.payload as { message: string };
       const raw = p?.message ?? 'Unknown error';
       this.emit({ type: 'error', message: this.decorateRuntimeError(raw) });
+      if (this.pendingInput) {
+        const lost = this.pendingInput;
+        this.pendingInput = null;
+        logger.warn(`AgentHost "${this.id}": discarded queued input due to error: "${lost.slice(0, 80)}"`);
+        this.emit({ type: 'error', message: 'A queued message was discarded due to the error above. Please re-send it.' });
+      }
     });
 
     a.on('doom_loop', (e) => {
@@ -447,7 +463,6 @@ export class AgentHost {
         { role: 'user' as const, content: frame },
       ],
       max_tokens: 120,
-      temperature: 0.3,
     }).then((res) => {
       this.commentaryInFlight = false;
       const text = (res?.choices?.[0]?.message?.content as string)?.trim();

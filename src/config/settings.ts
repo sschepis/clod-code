@@ -35,7 +35,7 @@ export interface ObotovsSettings {
   peerDispatchEnabled: boolean;
   subconsciousEnabled: boolean;
   shell: string;
-  alephnet: { enabled: boolean; port: number; nodeId: string };
+  openclaw?: { mode: 'managed' | 'connected'; url: string; };
 }
 
 const DEFAULT_ROUTING: Record<string, RouteAssignment> = {
@@ -65,7 +65,7 @@ export function getSettings(): ObotovsSettings {
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
     subconsciousEnabled: cfg.get<boolean>('subconsciousEnabled', false),
     shell: cfg.get<string>('shell', ''),
-    alephnet: cfg.get<ObotovsSettings['alephnet']>('alephnet', { enabled: false, port: 31337, nodeId: '' }),
+    openclaw: cfg.get<ObotovsSettings['openclaw']>('openclaw'),
   };
 }
 

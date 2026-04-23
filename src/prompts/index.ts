@@ -30,6 +30,7 @@ export {
 export {
   WORKING_ON_PLAN,
   LOOKING_INTO_THAT,
+  STOPPING_WORK,
   AGENT_INITIALIZING,
   peerDispatchQuestion,
   dispatchConfirmation,

@@ -12,8 +12,11 @@
  *   AgentManager summary updates → WebviewBridge (agents strip)
  */
 
-import type { Session } from '@sschepis/as-agent';
+import type { Session, ConversationMessage } from '@sschepis/as-agent';
 import type { AgentRuntime } from '@sschepis/as-agent';
+
+// MessageRole.User = 1 (from @sschepis/as-agent enum, value-import not available under CJS)
+const MESSAGE_ROLE_USER = 1;
 
 import type { SidebarProvider } from '../vscode-integration/sidebar-provider';
 import type { ObotovsSettings } from '../config/settings';
@@ -29,7 +32,7 @@ import { AgentHost } from './agent-host';
 import { AgentManager } from './agent-manager';
 import { WebviewBridge } from './webview-bridge';
 import { buildToolTree } from './tool-tree';
-import { pushSubconsciousEvent, CodeMap } from '../tools';
+import { pushSubconsciousEvent, CodeMap, BrowserSession } from '../tools';
 import { SessionStore } from './session-store';
 import { getUserPromptBridge } from './user-prompt-bridge';
 import { getAgentRuntime } from './runtime';
@@ -66,6 +69,7 @@ import {
   surfaceCrashedNotice,
   WORKING_ON_PLAN,
   LOOKING_INTO_THAT,
+  STOPPING_WORK,
   AGENT_INITIALIZING,
   peerDispatchQuestion,
   dispatchConfirmation,
@@ -78,6 +82,12 @@ function inlineTextAttachments(text: string, attachments?: Attachment[]): string
     .map(a => `\n\n--- ${a.name} ---\n${a.content}\n--- End ${a.name} ---`);
   if (textParts.length === 0) return text;
   return text + textParts.join('');
+}
+
+const STOP_PATTERNS = /^(stop|halt|cancel|abort|quit|enough|stop\s+working|please\s+stop|stop\s+that|stop\s+it|that'?s\s+enough)[\s.!]*$/i;
+
+function isStopIntent(text: string): boolean {
+  return STOP_PATTERNS.test(text.trim());
 }
 
 function truncateForMemory(s: string): string {
@@ -124,6 +134,9 @@ export class Orchestrator {
   private baseRouting: ObotovsSettings['routing'] | null = null;
   private onFileChanged?: (filePath: string) => void;
   private onSessionCleared?: () => void;
+  private diagnosticCollection?: vscode.DiagnosticCollection;
+  private decorationManager?: import('../tools').DecorationManager;
+  private browserSessions = new Map<string, BrowserSession>();
 
   private setContext(key: string, value: boolean): void {
     vscode.commands.executeCommand('setContext', key, value);
@@ -268,6 +281,13 @@ export class Orchestrator {
     // Debounced UI events save — fires on every slice change (token, event, tool status, etc.)
     this.bridge.onSliceChanged((agentId) => this.scheduleUiEventsSave(agentId));
 
+    // Immediate save for critical events (assistant messages, tool completions, errors, turn complete)
+    this.bridge.onCriticalSliceChange((agentId) => {
+      this.saveUiEventsNow(agentId).catch(err => {
+        logger.warn('Immediate UI events save failed', err);
+      });
+    });
+
     this.installObjectsWatcher();
   }
 
@@ -319,6 +339,36 @@ export class Orchestrator {
         });
       }
     }, 1000));
+  }
+
+  private async saveUiEventsNow(agentId: string): Promise<void> {
+    const existing = this.uiEventsSaveTimers.get(agentId);
+    if (existing) {
+      clearTimeout(existing);
+      this.uiEventsSaveTimers.delete(agentId);
+    }
+    const slice = this.bridge.getSlice(agentId);
+    if (!slice) return;
+    if (agentId === FOREGROUND_AGENT_ID) {
+      await this.sessionStore.saveUiEvents(slice.events);
+    } else if (this.manager.isInteractive(agentId)) {
+      await this.sessionStore.savePanelUiEvents(agentId, slice.events);
+    }
+  }
+
+  private async saveSessionNow(agentId: string): Promise<void> {
+    const host =
+      agentId === FOREGROUND_AGENT_ID
+        ? this.manager.getForeground()
+        : this.manager.get(agentId)?.host;
+    if (!host) return;
+    const session = host.getSession();
+    if (!session) return;
+    if (agentId === FOREGROUND_AGENT_ID) {
+      await this.sessionStore.save(session);
+    } else if (this.manager.isInteractive(agentId)) {
+      await this.sessionStore.savePanel(agentId, session);
+    }
   }
 
   /** Exposed for the `obotovs.openSurface` command. */
@@ -612,6 +662,7 @@ export class Orchestrator {
       content: text,
       timestamp: now(),
     });
+    await this.saveUiEventsNow(agentId);
     const host =
       agentId === FOREGROUND_AGENT_ID
         ? this.manager.getForeground()
@@ -708,17 +759,29 @@ export class Orchestrator {
   }
 
   dispose(): void {
-    // Flush any pending UI event saves immediately before tearing down
+    // Flush pending UI event saves and foreground session before tearing down
+    const savePromises: Promise<void>[] = [];
     for (const [agentId, timer] of this.uiEventsSaveTimers.entries()) {
       clearTimeout(timer);
       const slice = this.bridge.getSlice(agentId);
       if (slice) {
         if (agentId === FOREGROUND_AGENT_ID) {
-          void this.sessionStore.saveUiEvents(slice.events);
+          savePromises.push(this.sessionStore.saveUiEvents(slice.events));
         } else if (this.manager.isInteractive(agentId)) {
-          void this.sessionStore.savePanelUiEvents(agentId, slice.events);
+          savePromises.push(this.sessionStore.savePanelUiEvents(agentId, slice.events));
         }
       }
+    }
+    const fg = this.manager.getForeground();
+    if (fg) {
+      const s = fg.getSession();
+      if (s) savePromises.push(this.sessionStore.save(s));
+    }
+    if (savePromises.length > 0) {
+      Promise.race([
+        Promise.allSettled(savePromises),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]).catch(() => {});
     }
     this.uiEventsSaveTimers.clear();
 
@@ -741,6 +804,8 @@ export class Orchestrator {
     if (this.memoryChangeUnsubscribe) this.memoryChangeUnsubscribe();
     if (this.objectsBroadcastTimer) clearTimeout(this.objectsBroadcastTimer);
     this.objectsWatcher?.dispose();
+    for (const session of this.browserSessions.values()) session.dispose();
+    this.browserSessions.clear();
   }
 
   // ── Public accessors for ChatPanelManager ───────────────────────────
@@ -765,6 +830,14 @@ export class Orchestrator {
 
   setSessionClearedCallback(cb: () => void): void {
     this.onSessionCleared = cb;
+  }
+
+  setDiagnosticCollection(collection: vscode.DiagnosticCollection): void {
+    this.diagnosticCollection = collection;
+  }
+
+  setDecorationManager(manager: import('../tools').DecorationManager): void {
+    this.decorationManager = manager;
   }
 
   getAgentSummaries(): import('../shared/message-types').AgentSummary[] {
@@ -888,6 +961,8 @@ export class Orchestrator {
       }
     }
     this.manager.disposeInteractive(panelId);
+    this.browserSessions.get(panelId)?.dispose();
+    this.browserSessions.delete(panelId);
   }
 
   handlePanelMessage(panelId: string, msg: WebviewToExtMessage): void {
@@ -1079,11 +1154,19 @@ export class Orchestrator {
       this.bridge.post(msg);
     };
 
-    // Event appends/resolves for user/ask and user/secret must land on the
-    // correct slice. Use the bridge's appendEvent / patchEvent.
+    // Interactive prompts (ask, secret) always target the foreground slice
+    // so the user sees them even when a background agent triggers them.
+    const promptSlice = FOREGROUND_AGENT_ID;
+    const promptPost = (msg: ExtToWebviewMessage) => {
+      if ('agentId' in (msg as any)) {
+        (msg as any).agentId = FOREGROUND_AGENT_ID;
+      }
+      this.bridge.post(msg);
+    };
+
     const ask = {
       bridge,
-      post,
+      post: promptPost,
       createEvent: (e: {
         id: string;
         promptId: string;
@@ -1091,7 +1174,7 @@ export class Orchestrator {
         choices: string[];
         defaultChoice?: number;
       }) => {
-        this.bridge.appendEvent(agentId, {
+        this.bridge.appendEvent(promptSlice, {
           id: e.id,
           role: 'question',
           promptId: e.promptId,
@@ -1108,7 +1191,7 @@ export class Orchestrator {
         answerText?: string;
       }) => {
         this.bridge.patchEvent(
-          agentId,
+          promptSlice,
           (e) => e.role === 'question' && (e as any).promptId === promptId,
           result as any,
         );
@@ -1117,7 +1200,7 @@ export class Orchestrator {
 
     const secret = {
       bridge,
-      post,
+      post: promptPost,
       createEvent: (e: {
         id: string;
         promptId: string;
@@ -1125,7 +1208,7 @@ export class Orchestrator {
         description?: string;
         envPath: string;
       }) => {
-        this.bridge.appendEvent(agentId, {
+        this.bridge.appendEvent(promptSlice, {
           id: e.id,
           role: 'secret_request',
           promptId: e.promptId,
@@ -1141,7 +1224,7 @@ export class Orchestrator {
         savedToFile?: boolean;
       }) => {
         this.bridge.patchEvent(
-          agentId,
+          promptSlice,
           (e) => e.role === 'secret_request' && (e as any).promptId === promptId,
           result as any,
         );
@@ -1166,11 +1249,16 @@ export class Orchestrator {
 
     const planPropose = {
       bridge,
-      post,
-      appendEvent: (event: any) => this.bridge.appendEvent(agentId, event),
+      post: (msg: ExtToWebviewMessage) => {
+        if ('agentId' in (msg as any)) {
+          (msg as any).agentId = FOREGROUND_AGENT_ID;
+        }
+        this.bridge.post(msg);
+      },
+      appendEvent: (event: any) => this.bridge.appendEvent(FOREGROUND_AGENT_ID, event),
       patchEvent: (promptId: string, patch: Record<string, unknown>) => {
         this.bridge.patchEvent(
-          agentId,
+          FOREGROUND_AGENT_ID,
           (e) => e.role === 'plan_approval' && (e as any).promptId === promptId,
           patch as any,
         );
@@ -1217,7 +1305,23 @@ export class Orchestrator {
       codeMap: { getMap: () => codeMap },
       project: { manager: this.projectManager },
       planPropose,
+      diagnosticPublish: this.diagnosticCollection
+        ? { getCollection: () => this.diagnosticCollection! }
+        : undefined,
+      decoration: this.decorationManager
+        ? { getManager: () => this.decorationManager! }
+        : undefined,
       onFileChanged: this.onFileChanged,
+      web: {
+        getSession: () => {
+          let session = this.browserSessions.get(agentId);
+          if (!session) {
+            session = new BrowserSession();
+            this.browserSessions.set(agentId, session);
+          }
+          return session;
+        },
+      },
     });
   }
 
@@ -1266,6 +1370,7 @@ export class Orchestrator {
               timestamp: now(),
               attachments: msg.attachments,
             });
+            await this.saveUiEventsNow(agentId);
 
             // Assistant confirms the dispatch
             this.bridge.appendEvent(agentId, {
@@ -1305,6 +1410,9 @@ export class Orchestrator {
           timestamp: now(),
           attachments: msg.attachments,
         });
+        // Save to disk BEFORE proceeding — user messages must survive crashes
+        await this.saveUiEventsNow(agentId);
+        await this.saveSessionNow(agentId);
         const host =
           agentId === FOREGROUND_AGENT_ID
             ? this.manager.getForeground()
@@ -1316,6 +1424,17 @@ export class Orchestrator {
             : baseText;
 
           if (host.isProcessing && agentId === FOREGROUND_AGENT_ID) {
+            if (isStopIntent(msg.text)) {
+              this.bridge.appendEvent(agentId, {
+                id: `assistant-${Date.now()}`,
+                role: 'assistant',
+                content: STOPPING_WORK,
+                timestamp: now(),
+              });
+              getUserPromptBridge().cancelAll();
+              await host.interrupt();
+              break;
+            }
             const isPlan = msg.mode === 'plan';
             this.bridge.appendEvent(agentId, {
               id: `sys-${Date.now()}`,
@@ -1560,8 +1679,10 @@ export class Orchestrator {
         if (!slice) break;
         const idx = slice.events.findIndex((e: SessionEvent) => e.id === msg.eventId);
         if (idx !== -1) {
+          const userMsgCount = this.countUserInputEvents(slice.events, idx + 1);
           slice.events = slice.events.slice(0, idx + 1);
           this.scheduleUiEventsSave(agentId);
+          await this.truncateSessionToUserMessage(agentId, userMsgCount);
         }
         break;
       }
@@ -1579,18 +1700,19 @@ export class Orchestrator {
         const agentId = msg.agentId ?? FOREGROUND_AGENT_ID;
         const slice = this.bridge.getSlice(agentId);
         if (!slice) break;
-        // Revert to just before the edited message
         const idx = slice.events.findIndex((e: SessionEvent) => e.id === msg.eventId);
         if (idx !== -1) {
+          const userMsgCount = this.countUserInputEvents(slice.events, idx);
           slice.events = slice.events.slice(0, idx);
+          await this.truncateSessionToUserMessage(agentId, userMsgCount);
         }
-        // Resubmit with edited text
         this.bridge.appendEvent(agentId, {
           id: `user-${Date.now()}`,
           role: 'user',
           content: msg.text,
           timestamp: now(),
         });
+        await this.saveUiEventsNow(agentId);
         const host =
           agentId === FOREGROUND_AGENT_ID
             ? this.manager.getForeground()
@@ -2101,6 +2223,61 @@ export class Orchestrator {
         return lines.join('\n');
       },
     );
+  }
+
+  /**
+   * Count user-submitted input events (not tool results) in the first `upTo` events.
+   */
+  private countUserInputEvents(events: SessionEvent[], upTo: number): number {
+    let count = 0;
+    for (let i = 0; i < upTo && i < events.length; i++) {
+      const e = events[i];
+      if (e.role === 'user' && !/^\[Tool result \(/.test(e.content)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Truncate the agent's session.messages so it contains only the first
+   * `keepUserMessages` user-input messages (and their subsequent responses).
+   * Then sync the session so the context manager stays consistent.
+   */
+  private async truncateSessionToUserMessage(agentId: string, keepUserMessages: number): Promise<void> {
+    const host =
+      agentId === FOREGROUND_AGENT_ID
+        ? this.manager.getForeground()
+        : this.manager.get(agentId)?.host;
+    if (!host) return;
+    const session = host.getSession();
+    if (!session) return;
+
+    let userCount = 0;
+    let truncateAt = session.messages.length;
+    for (let i = 0; i < session.messages.length; i++) {
+      const msg = session.messages[i];
+      if (msg.role === MESSAGE_ROLE_USER && this.isUserInputMessage(msg)) {
+        userCount++;
+        if (userCount > keepUserMessages) {
+          truncateAt = i;
+          break;
+        }
+      }
+    }
+
+    if (truncateAt < session.messages.length) {
+      session.messages = session.messages.slice(0, truncateAt);
+      await host.syncSession(session);
+    }
+  }
+
+  /**
+   * Determine if a session message is a real user input (text) vs a tool-result message.
+   */
+  private isUserInputMessage(msg: ConversationMessage): boolean {
+    if (msg.role !== MESSAGE_ROLE_USER) return false;
+    return msg.blocks.some(b => b.kind === 'text') && !msg.blocks.some(b => b.kind === 'tool_result');
   }
 }
 

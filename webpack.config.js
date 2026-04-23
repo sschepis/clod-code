@@ -30,6 +30,10 @@ const config = {
     // and image processing — they must be resolved at runtime, not bundled.
     { 'onnxruntime-node': 'commonjs onnxruntime-node' },
     { sharp: 'commonjs sharp' },
+    // Optional native deps of ws (used by puppeteer-core) and linkedom
+    { bufferutil: 'commonjs bufferutil' },
+    { 'utf-8-validate': 'commonjs utf-8-validate' },
+    { canvas: 'commonjs canvas' },
     // ESM-only @sschepis and @aleph-ai packages are NOT listed here. They are
     // imported via the `dynamicImport()` helper at call sites, which Node.js
     // resolves natively at runtime using native dynamic ESM import.

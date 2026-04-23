@@ -64,8 +64,6 @@ export function createPlanProposeHandler(deps: PlanProposeDeps, agentDeps?: Agen
       timestamp: now(),
     });
 
-    deps.post({ type: 'plan_approval_request', promptId, planSummary, planFilePath: filePath });
-
     const result = await deps.bridge.registerPlanApproval(promptId);
 
     if (result.denied) {

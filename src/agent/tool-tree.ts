@@ -40,7 +40,7 @@ import {
   type AskDeps, type SecretDeps, type AgentToolDeps,
   type SurfaceToolDeps, type RouteToolDeps, type SkillToolDeps,
   type PeerToolDeps, type MemoryToolDeps, type ShellDeps,
-  createChatSetTitleHandler, type ChatTitleDeps,
+  createChatSetTitleHandler, createChatSetNameHandler, type ChatTitleDeps,
   createSpeakHandler, type ElevenLabsTtsDeps,
   createPlanProposeHandler, type PlanProposeDeps,
   createCodeSymbolsHandler,
@@ -58,8 +58,20 @@ import {
   createCodeSignatureHandler,
   createCodeCompletionsHandler,
   createCodeInlayHintsHandler,
+  createCodeTypeDefinitionHandler,
+  createCodeImplementationHandler,
+  createCodeDeclarationHandler,
+  createCodeFoldingHandler,
+  createCodeSelectionRangesHandler,
+  createCodeImpactHandler,
+  createCodeDataflowHandler,
+  createCodeSemanticDiffHandler,
+  createCodeDiagnosticsPublishHandler,
+  createCodeDecorateHandler,
   createCodeMapHandler,
   type CodeMapDeps,
+  type DiagnosticPublishDeps,
+  type DecorationDeps,
   createProjectInitHandler,
   createProjectListHandler,
   createProjectGetHandler,
@@ -75,13 +87,16 @@ import {
   createProjectStatusHandler,
   createProjectArchiveHandler,
   type ProjectToolDeps,
+  createWebSearchHandler,
+  createWebFetchHandler,
+  createWebBrowseHandler,
+  createWebClickHandler,
+  createWebTypeHandler,
+  createWebScreenshotHandler,
+  createWebEvalHandler,
+  createWebCloseHandler,
+  type WebBrowseDeps,
 } from '../tools';
-import {
-  createAlephNetThinkHandler,
-  createAlephNetRememberHandler,
-  createAlephNetRecallHandler,
-  createAlephNetChatHandler,
-} from '../tools/alephnet-tools';
 
 export interface ToolTreeResult {
   router: Router;
@@ -116,8 +131,14 @@ export interface ToolTreeDeps {
   project?: ProjectToolDeps;
   /** Plan proposal — saves plan, opens markdown preview, shows approval prompt. */
   planPropose?: PlanProposeDeps;
+  /** Publish AI-generated diagnostics to VS Code Problems panel. */
+  diagnosticPublish?: DiagnosticPublishDeps;
+  /** Manage inline text editor decorations (highlights, annotations). */
+  decoration?: DecorationDeps;
   /** Called when the agent writes or edits a file — used for AI-modified file decorations. */
   onFileChanged?: (filePath: string) => void;
+  /** Web browsing — headless Chrome session for search, fetch, and interactive browsing. */
+  web?: WebBrowseDeps;
 }
 
 /**
@@ -136,7 +157,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           description: 'Read a file with line numbers. Supports offset and limit for large files.',
           requiredArgs: { path: { type: 'string', description: 'Absolute or workspace-relative file path' } },
           optionalArgs: {
-            offset: { type: 'number', description: 'Start line (0-based)', default: 0 },
+            offset: { type: 'number', description: 'Start line (1-based)', default: 1 },
             limit: { type: 'number', description: 'Number of lines to read', default: 2000 },
           },
           handler: createFileReadHandler(),
@@ -152,10 +173,12 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         .leaf('edit', {
           description: [
             'Edit a file by replacing exact string matches. Supports undo when the file is open.',
-            'Three modes: (1) Single edit with old_string/new_string.',
+            'Four modes: (1) Single edit with old_string/new_string.',
             '(2) Multi-edit with edits[] array — applies all atomically.',
             '(3) Line-anchored insert with after_line or before_line + new_string — inserts without needing to match existing text.',
-            'If exact match fails, suggests similar lines with whitespace differences.',
+            '(4) Line-range delete with start_line + end_line (1-based, inclusive) — deletes lines without needing to match text.',
+            'Handles Unicode confusables (box-drawing, smart quotes, special dashes) transparently.',
+            'If exact match fails, suggests similar lines with whitespace differences and hex diagnostics.',
           ].join(' '),
           requiredArgs: {
             path: { type: 'string', description: 'File path' },
@@ -167,6 +190,8 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             edits: { type: 'json', description: 'Array of {old_string, new_string} pairs for batch editing (mode 2). All validated before any are applied.' },
             after_line: { type: 'number', description: 'Insert new_string after this line number (1-based). Use 0 to insert at file start. (mode 3)' },
             before_line: { type: 'number', description: 'Insert new_string before this line number (1-based). (mode 3)' },
+            start_line: { type: 'number', description: 'First line to delete (1-based, inclusive). Use with end_line for line-range delete. (mode 4)' },
+            end_line: { type: 'number', description: 'Last line to delete (1-based, inclusive). Use with start_line for line-range delete. (mode 4)' },
           },
           handler: createFileEditHandler(deps.onFileChanged),
         });
@@ -196,6 +221,88 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             max_results: { type: 'number', description: 'Max matches', default: 50 },
           },
           handler: createGrepSearchHandler(),
+        });
+    })
+
+    // ── Web search, fetch & browse ──────────────────────────────
+    .branch('web', 'Search the internet, fetch web pages, and browse with a headless browser. Use web/search to find information online (docs, errors, APIs). Use web/fetch for lightweight content extraction from a URL. Use web/browse to launch a headless Chrome session with screenshots — followed by web/click, web/type, web/screenshot, web/eval for interactive browsing. Prefer local tools (search/grep, code/explore) for workspace code; use web/* for external information.', (web) => {
+      web
+        .leaf('search', {
+          description: 'Search the internet. Returns titles, URLs, and snippets. Use for docs, API references, error solutions, package info. No API key required (DuckDuckGo by default; set BRAVE_SEARCH_API_KEY for better results).',
+          requiredArgs: { query: { type: 'string', description: 'Search query (e.g. "TypeScript zod validation", "ECONNRESET node.js fix")' } },
+          optionalArgs: {
+            max_results: { type: 'number', description: 'Maximum results to return', default: 8 },
+          },
+          handler: createWebSearchHandler(),
+        })
+        .leaf('fetch', {
+          description: 'Fetch a URL and extract readable text. Handles HTML (strips nav/ads, extracts article text), JSON (formats response), and plain text. Does not execute JavaScript — for JS-heavy pages use web/browse instead.',
+          requiredArgs: { url: { type: 'string', description: 'URL to fetch (http:// or https://)' } },
+          optionalArgs: {
+            max_length: { type: 'number', description: 'Max chars of extracted text', default: 50000 },
+            selector: { type: 'string', description: 'CSS selector to extract specific content (e.g. "article", ".main-content", "#readme")' },
+          },
+          handler: createWebFetchHandler(),
+        })
+        .leaf('browse', {
+          description: 'Open a URL in a headless Chrome browser. Returns a screenshot and text preview. Starts a new session or navigates an existing one. Use for JS-rendered pages, visual inspection, or interactive browsing workflows.',
+          requiredArgs: { url: { type: 'string', description: 'URL to browse (http:// or https://)' } },
+          optionalArgs: {
+            wait: { type: 'number', description: 'Extra ms to wait after page load (for JS rendering)', default: 2000 },
+            viewport_width: { type: 'number', description: 'Browser viewport width in pixels', default: 1280 },
+            viewport_height: { type: 'number', description: 'Browser viewport height in pixels', default: 800 },
+          },
+          handler: deps.web
+            ? createWebBrowseHandler(deps.web)
+            : async () => '[ERROR] Web browsing is not available in this context.',
+        })
+        .leaf('click', {
+          description: 'Click an element in the browser session. Provide a CSS selector or x/y pixel coordinates. Returns a screenshot after clicking. Waits for navigation if the click triggers one.',
+          optionalArgs: {
+            selector: { type: 'string', description: 'CSS selector to click (e.g. "button.submit", "a[href=\'/login\']")' },
+            x: { type: 'number', description: 'X pixel coordinate to click' },
+            y: { type: 'number', description: 'Y pixel coordinate to click' },
+          },
+          handler: deps.web
+            ? createWebClickHandler(deps.web)
+            : async () => '[ERROR] Web browsing is not available in this context.',
+        })
+        .leaf('type', {
+          description: 'Type text into a form field in the browser session. Clears the field first, then types. Optionally submits by pressing Enter.',
+          requiredArgs: {
+            selector: { type: 'string', description: 'CSS selector for the input field' },
+            text: { type: 'string', description: 'Text to type' },
+          },
+          optionalArgs: {
+            submit: { type: 'boolean', description: 'Press Enter after typing to submit', default: false },
+          },
+          handler: deps.web
+            ? createWebTypeHandler(deps.web)
+            : async () => '[ERROR] Web browsing is not available in this context.',
+        })
+        .leaf('screenshot', {
+          description: 'Capture a screenshot of the current browser page. Use to see the current state after interactions.',
+          optionalArgs: {
+            name: { type: 'string', description: 'Label for the screenshot file' },
+            full_page: { type: 'boolean', description: 'Capture the full scrollable page', default: false },
+            selector: { type: 'string', description: 'CSS selector to screenshot a specific element' },
+          },
+          handler: deps.web
+            ? createWebScreenshotHandler(deps.web)
+            : async () => '[ERROR] Web browsing is not available in this context.',
+        })
+        .leaf('eval', {
+          description: 'Run JavaScript in the browser page context. Use for extracting data, checking element state, scrolling, or any DOM manipulation.',
+          requiredArgs: { expression: { type: 'string', description: 'JavaScript expression to evaluate' } },
+          handler: deps.web
+            ? createWebEvalHandler(deps.web)
+            : async () => '[ERROR] Web browsing is not available in this context.',
+        })
+        .leaf('close', {
+          description: 'Close the headless browser session and free resources.',
+          handler: deps.web
+            ? createWebCloseHandler(deps.web)
+            : async () => '[ERROR] No browser session to close.',
         });
     })
 
@@ -367,6 +474,105 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             end_line: { type: 'number', description: 'End line' },
           },
           handler: createCodeInlayHintsHandler(),
+        })
+        .leaf('type-definition', {
+          description: 'Go to where a TYPE is defined (not the symbol). E.g., for `const x: Config = ...`, navigates to the Config interface. Use when you need the shape/structure, not the assignment.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol reference' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name to find type definition for' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeTypeDefinitionHandler(deps.codeMap),
+        })
+        .leaf('implementation', {
+          description: 'Find all concrete implementations of an interface or abstract method. Shows where contracts are fulfilled across the codebase.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the interface or abstract method' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Interface or method name' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            max_results: { type: 'number', description: 'Max implementations to return', default: 30 },
+          },
+          handler: createCodeImplementationHandler(deps.codeMap),
+        })
+        .leaf('declaration', {
+          description: 'Go to declaration of a symbol. Useful for C/C++ where declaration differs from definition (header vs source). For TypeScript, typically matches definition.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol reference' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeDeclarationHandler(deps.codeMap),
+        })
+        .leaf('folding', {
+          description: 'Get foldable regions in a file — functions, blocks, imports, comments. Useful for understanding file structure and finding logical sections.',
+          requiredArgs: { path: { type: 'string', description: 'File path' } },
+          handler: createCodeFoldingHandler(),
+        })
+        .leaf('selection-ranges', {
+          description: 'Get nested semantic selection ranges at a position. Shows how the language server would expand selection: expression → statement → block → function → file.',
+          requiredArgs: {
+            path: { type: 'string', description: 'File path' },
+            line: { type: 'number', description: 'Line number (1-based)' },
+          },
+          optionalArgs: {
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeSelectionRangesHandler(),
+        })
+        .leaf('impact', {
+          description: 'Analyze the blast radius of changing a symbol. Shows: all references across files, diagnostics in affected files, and test coverage gaps. Use before refactoring.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the symbol to analyze' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name to analyze' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+          },
+          handler: createCodeImpactHandler(deps.codeMap),
+        })
+        .leaf('dataflow', {
+          description: 'Trace how a value flows through the codebase. Follows from definition → references → assignments to new variables → their references. Best-effort heuristic.',
+          requiredArgs: { path: { type: 'string', description: 'File containing the value to trace' } },
+          optionalArgs: {
+            symbol: { type: 'string', description: 'Symbol name to trace' },
+            line: { type: 'number', description: 'Line number (1-based) — alternative to symbol' },
+            column: { type: 'number', description: 'Column number (1-based)', default: 1 },
+            depth: { type: 'number', description: 'Max flow depth (1-3)', default: 2 },
+          },
+          handler: createCodeDataflowHandler(deps.codeMap),
+        })
+        .leaf('semantic-diff', {
+          description: 'Compare document symbols between HEAD and working copy. Shows which functions/classes/interfaces were added, removed, or modified — higher-level than line-based git diff.',
+          requiredArgs: { path: { type: 'string', description: 'File path to compare against HEAD' } },
+          handler: createCodeSemanticDiffHandler(),
+        })
+        .leaf('diagnostics-publish', {
+          description: 'Publish AI-generated diagnostics (findings, suggestions) to the VS Code Problems panel. action="add" posts findings, "clear" removes them, "list" shows active ones.',
+          requiredArgs: {
+            action: { type: 'string', description: '"add", "clear", or "list"' },
+          },
+          optionalArgs: {
+            path: { type: 'string', description: 'File path (required for add, optional for clear)' },
+            diagnostics: { type: 'string', description: 'JSON array for add: [{line, message, severity?, source?}]' },
+          },
+          handler: deps.diagnosticPublish
+            ? createCodeDiagnosticsPublishHandler(deps.diagnosticPublish)
+            : async () => '[INFO] Diagnostic publishing is not available in this context.',
+        })
+        .leaf('decorate', {
+          description: 'Add inline decorations (highlights, annotations, underlines) to files in the editor. Visually mark findings, important code, or review comments.',
+          requiredArgs: {
+            action: { type: 'string', description: '"add", "clear", or "list"' },
+          },
+          optionalArgs: {
+            path: { type: 'string', description: 'File path (required for add, optional for clear)' },
+            decorations: { type: 'string', description: 'JSON array for add: [{line, end_line?, text?, color?, style?}]. color: yellow|red|green|blue|orange or hex. style: highlight|underline|border|gutter' },
+          },
+          handler: deps.decoration
+            ? createCodeDecorateHandler(deps.decoration)
+            : async () => '[INFO] Decoration management is not available in this context.',
         });
     })
 
@@ -521,7 +727,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── Chat window control ─────────────────────────────────────────
-    .branch('chat', 'Control the chat window. Use chat/set_title to give this conversation a meaningful name based on the topic being discussed — helps the user identify conversations in the sidebar.', (chat) => {
+    .branch('chat', 'Control the chat window. Use chat/set_title to give this conversation a meaningful name. Use chat/set_name to change your display name shown in chat messages.', (chat) => {
       chat
         .leaf('set_title', {
           description: 'Set the title/name of this chat conversation window. Use this to give the conversation a meaningful name based on what is being discussed or worked on.',
@@ -529,6 +735,13 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             title: { type: 'string', description: 'The new title for the chat window (max 100 chars)' },
           },
           handler: createChatSetTitleHandler(deps.chatTitle ?? { setTitle: () => {} }),
+        })
+        .leaf('set_name', {
+          description: 'Change your display name shown next to your messages in the chat. Use this when the user asks you to rename yourself or adopt a persona. The name appears in the chat bubble header.',
+          requiredArgs: {
+            name: { type: 'string', description: 'Your new display name (max 50 chars)' },
+          },
+          handler: createChatSetNameHandler(deps.chatTitle ?? { setTitle: () => {} }),
         });
     })
 
@@ -1103,30 +1316,6 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             args: { type: 'json', description: 'Arguments passed to the command (array). Some commands take a single object or URI.' },
           },
           handler: createVscodeRunHandler(),
-        });
-    })
-    .branch('alephnet', 'Interact with the AlephNet Distributed Sentience Network. Use alephnet/think for semantic analysis, remember/recall for GMF storage, and chat to message other agents.', (v) => {
-      v
-        .leaf('think', {
-          description: 'Run semantic analysis on a text or concept.',
-          requiredArgs: { text: { type: 'string', description: 'Text to analyze' } },
-          handler: createAlephNetThinkHandler(),
-        })
-        .leaf('remember', {
-          description: 'Store a concept in the Global Memory Field.',
-          requiredArgs: { concept: { type: 'string', description: 'Name of the concept' }, content: { type: 'string', description: 'Content to store' } },
-          handler: createAlephNetRememberHandler(),
-        })
-        .leaf('recall', {
-          description: 'Query the Global Memory Field.',
-          requiredArgs: { query: { type: 'string', description: 'Search query' } },
-          optionalArgs: { threshold: { type: 'number', description: 'Similarity threshold (0.0 - 1.0)' } },
-          handler: createAlephNetRecallHandler(),
-        })
-        .leaf('chat', {
-          description: 'Send a direct message to another agent on the AlephNet mesh.',
-          requiredArgs: { peerId: { type: 'string', description: 'Target agent node ID' }, message: { type: 'string', description: 'Message content' } },
-          handler: createAlephNetChatHandler(),
         });
     })
 

@@ -6,7 +6,6 @@ import type { ChatPanelManager } from './chat-panel-manager';
 import type { ExplorerNode, ExplorerProvider } from './explorer-provider';
 import { PROVIDERS } from '../config/provider-registry';
 import { SettingsPanel } from './settings-panel';
-import { openAlephNetProfile } from './alephnet-panel';
 import { logger } from '../shared/logger';
 
 /**
@@ -54,6 +53,33 @@ export function registerCommands(
       } else {
         await orchestrator.getSurfaceManager().openPicker();
       }
+    })
+  );
+
+  // ── Surface toolbar commands ──────────────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.SURFACE_REFRESH, () => {
+      orchestrator?.getSurfaceManager().getActiveSurface()?.reload();
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.SURFACE_VIEW_SOURCE, async () => {
+      const panel = orchestrator?.getSurfaceManager().getActiveSurface();
+      if (!panel) return;
+      const doc = await vscode.workspace.openTextDocument(panel.filePath);
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.SURFACE_INSPECT, () => {
+      vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
+    })
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.SURFACE_OPEN_IN_BROWSER, () => {
+      const panel = orchestrator?.getSurfaceManager().getActiveSurface();
+      if (!panel) return;
+      vscode.env.openExternal(vscode.Uri.file(panel.filePath));
     })
   );
 
@@ -227,20 +253,6 @@ export function registerCommands(
     })
   );
 
-  // ── AlephNet commands ────────────────────────────────────────────
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMANDS.ALEPHNET_OPEN_PROFILE, () => {
-      openAlephNetProfile(context.extensionUri);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMANDS.ALEPHNET_REFRESH, () => {
-      explorerProvider?.refresh();
-    })
-  );
-
   // ── Context Menu Helpers ─────────────────────────────────────────
 
   const askWithSelection = async (promptPrefix: string) => {
@@ -282,7 +294,7 @@ export function registerCommands(
   // Tree view commands receive (clickedNode, selectedNodes[]) when canSelectMany is true.
 
   const resolveNodes = (node: ExplorerNode, selected?: ExplorerNode[]): ExplorerNode[] =>
-    selected && selected.length > 0 ? selected : [node];
+    selected && selected.length > 0 ? selected : node ? [node] : [];
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.EXPLORER_OPEN_FILE, (node: ExplorerNode, selected?: ExplorerNode[]) => {

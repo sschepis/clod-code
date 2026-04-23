@@ -35,6 +35,7 @@ const EMPTY_OBJECTS: ObjectSnapshot = {
   skills: [],
   memories: [],
   conversations: [],
+  projects: [],
 };
 
 const DEFAULT_MODEL: ModelInfo = {

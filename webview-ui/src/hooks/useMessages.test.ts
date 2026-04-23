@@ -17,7 +17,7 @@ describe('useMessages', () => {
     act(() => result.current.appendToken(AGENT_ID, 'Hello', 'evt-1'));
     expect(result.current.focusedSlice.events).toHaveLength(1);
     expect(result.current.focusedSlice.events[0].role).toBe('assistant');
-    expect(result.current.focusedSlice.events[0].content).toBe('Hello');
+    expect((result.current.focusedSlice.events[0] as any).content).toBe('Hello');
   });
 
   it('appendToken extends an existing assistant event with the same id', () => {
@@ -25,7 +25,7 @@ describe('useMessages', () => {
     act(() => result.current.appendToken(AGENT_ID, 'Hello', 'evt-1'));
     act(() => result.current.appendToken(AGENT_ID, ' world', 'evt-1'));
     expect(result.current.focusedSlice.events).toHaveLength(1);
-    expect(result.current.focusedSlice.events[0].content).toBe('Hello world');
+    expect((result.current.focusedSlice.events[0] as any).content).toBe('Hello world');
   });
 
   it('addEvent adds to the correct agent slice', () => {
@@ -33,7 +33,7 @@ describe('useMessages', () => {
     const event = { id: 'u1', role: 'user' as const, content: 'test', timestamp: '12:00' };
     act(() => result.current.addEvent(AGENT_ID, event));
     expect(result.current.focusedSlice.events).toHaveLength(1);
-    expect(result.current.focusedSlice.events[0].content).toBe('test');
+    expect((result.current.focusedSlice.events[0] as any).content).toBe('test');
   });
 
   it('updateToolStatus patches a tool event', () => {
@@ -59,7 +59,7 @@ describe('useMessages', () => {
     const model = { provider: 'openai', model: 'gpt-4o', isLocal: false };
     act(() => result.current.sync(AGENT_ID, newEvents, phase, cost, model, 'act'));
     expect(result.current.focusedSlice.events).toHaveLength(1);
-    expect(result.current.focusedSlice.events[0].content).toBe('new');
+    expect((result.current.focusedSlice.events[0] as any).content).toBe('new');
     expect(result.current.focusedSlice.phase.phase).toBe('thinking');
     expect(result.current.focusedSlice.cost.totalTokens).toBe(100);
   });

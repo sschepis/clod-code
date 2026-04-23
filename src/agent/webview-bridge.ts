@@ -58,6 +58,7 @@ export class WebviewBridge {
   private focusedAgentId: string = FOREGROUND_AGENT_ID;
   private targets = new Map<string, WebviewTarget>();
   private sliceChangeListeners: SliceChangeListener[] = [];
+  private criticalSliceListeners: SliceChangeListener[] = [];
 
   constructor() {}
 
@@ -65,8 +66,18 @@ export class WebviewBridge {
     this.sliceChangeListeners.push(listener);
   }
 
+  onCriticalSliceChange(listener: SliceChangeListener): void {
+    this.criticalSliceListeners.push(listener);
+  }
+
   private notifySliceChanged(agentId: string): void {
     for (const l of this.sliceChangeListeners) {
+      try { l(agentId); } catch { /* best-effort */ }
+    }
+  }
+
+  private notifyCriticalSliceChange(agentId: string): void {
+    for (const l of this.criticalSliceListeners) {
       try { l(agentId); } catch { /* best-effort */ }
     }
   }
@@ -274,7 +285,9 @@ export class WebviewBridge {
     }
     slice.events.push(event);
     if (slice.events.length > MAX_EVENTS_PER_SLICE) {
-      slice.events.splice(0, slice.events.length - MAX_EVENTS_PER_SLICE);
+      const dropped = slice.events.length - MAX_EVENTS_PER_SLICE;
+      logger.info(`Slice "${agentId}": truncating ${dropped} oldest event(s) (cap=${MAX_EVENTS_PER_SLICE})`);
+      slice.events.splice(0, dropped);
     }
     this.post({ type: 'event', agentId, event });
     this.notifySliceChanged(agentId);
@@ -351,6 +364,13 @@ export class WebviewBridge {
     return { totalTokens, totalCost };
   }
 
+  private getAgentDisplayName(agentId: string): string | undefined {
+    const summary = this.summaries.get(agentId);
+    if (!summary) return undefined;
+    if (summary.label === 'Foreground') return undefined;
+    return summary.label;
+  }
+
   // ── HostEvent → webview translation ─────────────────────────────────
 
   private handleHostEvent(agentId: string, event: HostEvent): void {
@@ -387,8 +407,10 @@ export class WebviewBridge {
           role: 'assistant',
           content: event.text,
           model: event.model ?? slice.activeModel.model,
+          agentName: this.getAgentDisplayName(agentId),
           timestamp: now(),
         });
+        this.notifyCriticalSliceChange(agentId);
         break;
       }
 
@@ -403,15 +425,24 @@ export class WebviewBridge {
         if (last && last.id === eventId && last.role === 'assistant') {
           slice.events[lastIdx] = { ...last, content: last.content + event.text } as SessionEvent;
         } else {
-          slice.events.push({
-            id: eventId,
-            role: 'assistant',
-            content: event.text,
-            model: slice.activeModel.model,
-            timestamp: now(),
-          });
-          if (slice.events.length > MAX_EVENTS_PER_SLICE) {
-            slice.events.splice(0, slice.events.length - MAX_EVENTS_PER_SLICE);
+          const existingIdx = slice.events.findIndex(e => e.id === eventId);
+          if (existingIdx !== -1 && slice.events[existingIdx].role === 'assistant') {
+            const existing = slice.events[existingIdx] as import('../shared/message-types').AssistantEvent;
+            slice.events[existingIdx] = { ...existing, content: existing.content + event.text };
+          } else {
+            slice.events.push({
+              id: eventId,
+              role: 'assistant',
+              content: event.text,
+              model: slice.activeModel.model,
+              agentName: this.getAgentDisplayName(agentId),
+              timestamp: now(),
+            });
+            if (slice.events.length > MAX_EVENTS_PER_SLICE) {
+              const dropped = slice.events.length - MAX_EVENTS_PER_SLICE;
+              logger.info(`Slice "${agentId}": truncating ${dropped} oldest event(s) during token stream (cap=${MAX_EVENTS_PER_SLICE})`);
+              slice.events.splice(0, dropped);
+            }
           }
         }
         this.post({ type: 'token', agentId, text: event.text, eventId });
@@ -422,13 +453,17 @@ export class WebviewBridge {
       case 'tool_start': {
         slice.streamingEventId = null;
         const eventId = `tool-${Date.now()}-${rand()}`;
+        let parsedKwargs = event.kwargs;
+        if (typeof parsedKwargs === 'string') {
+          try { parsedKwargs = JSON.parse(parsedKwargs); } catch { parsedKwargs = undefined; }
+        }
         this.appendEvent(agentId, {
           id: eventId,
           role: 'tool',
           toolName: event.command,
           command: event.command,
           status: 'running',
-          kwargs: event.kwargs,
+          kwargs: parsedKwargs as Record<string, unknown> | undefined,
           timestamp: now(),
         });
         break;
@@ -451,6 +486,7 @@ export class WebviewBridge {
               duration,
             });
             this.notifySliceChanged(agentId);
+            this.notifyCriticalSliceChange(agentId);
             break;
           }
         }
@@ -493,6 +529,7 @@ export class WebviewBridge {
         slice.phase = { phase: 'idle', message: '' };
         slice.consecutiveToolRounds = 0;
         this.post({ type: 'phase', agentId, phase: 'idle', message: '' });
+        this.notifyCriticalSliceChange(agentId);
         break;
 
       case 'cost':
@@ -520,6 +557,7 @@ export class WebviewBridge {
           content: `Error: ${event.message}`,
           timestamp: now(),
         });
+        this.notifyCriticalSliceChange(agentId);
         break;
 
       case 'doom_loop':
@@ -580,6 +618,7 @@ function now(): string {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+let _eventSeq = 0;
 function rand(): string {
-  return Math.random().toString(36).slice(2, 6);
+  return (++_eventSeq).toString(36);
 }

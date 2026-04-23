@@ -22,6 +22,7 @@ export interface AssistantEvent extends BaseEvent {
   role: 'assistant';
   content: string;
   model?: string;
+  agentName?: string;
 }
 
 export interface ThoughtEvent extends BaseEvent {

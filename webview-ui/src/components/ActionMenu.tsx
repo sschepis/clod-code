@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Check, Copy, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Copy, Pencil, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 
 interface ActionMenuProps {
   content: string;
   onRevert: (id: string) => void;
   onEdit?: (id: string, content: string) => void;
+  onRerun?: (id: string, content: string) => void;
   onDelete?: (id: string) => void;
   id: string;
   role: 'user' | 'assistant';
@@ -19,7 +20,7 @@ function copyToClipboard(text: string) {
   textArea.remove();
 }
 
-export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdit, onDelete, id, role }) => {
+export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdit, onRerun, onDelete, id, role }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -44,6 +45,15 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({ content, onRevert, onEdi
           title="Edit & resubmit"
         >
           <Pencil size={14} />
+        </button>
+      )}
+      {role === 'user' && onRerun && (
+        <button
+          onClick={() => onRerun(id, content)}
+          className="p-1.5 text-vscode-desc hover:text-emerald-400 hover:bg-vscode-hoverBg rounded transition-colors"
+          title="Rerun message"
+        >
+          <RefreshCw size={14} />
         </button>
       )}
       {onDelete && (

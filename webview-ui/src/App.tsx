@@ -199,6 +199,9 @@ export default function App() {
       case 'agents_sync':
         syncAgents(msg.agents, isPanelMode ? PANEL_AGENT_ID! : msg.focusedAgentId);
         break;
+      case 'title_changed':
+        if (msg.agentId) patchAgent(msg.agentId, { label: msg.title });
+        break;
       case 'peers_update':
         setPeers(msg.peers);
         break;
@@ -251,8 +254,12 @@ export default function App() {
     deleteEventMsg(eventId, focusedAgentId);
   }, [deleteEvent, deleteEventMsg, focusedAgentId]);
 
-  const handleEdit = useCallback((eventId: string, content: string) => {
-    // Revert to just before this message, then resubmit with edited text
+  const handleEdit = useCallback((eventId: string, newContent: string) => {
+    revertTo(focusedAgentId, eventId);
+    editAndResubmit(eventId, newContent, focusedAgentId);
+  }, [revertTo, editAndResubmit, focusedAgentId]);
+
+  const handleRerun = useCallback((eventId: string, content: string) => {
     revertTo(focusedAgentId, eventId);
     editAndResubmit(eventId, content, focusedAgentId);
   }, [revertTo, editAndResubmit, focusedAgentId]);
@@ -424,6 +431,7 @@ export default function App() {
         isProcessing={isProcessing}
         onRevert={handleRevert}
         onEdit={handleEdit}
+        onRerun={handleRerun}
         onDelete={handleDelete}
         onPermissionRespond={(eventId, allowed, remember) =>
           respondPermission(eventId, allowed, remember, focusedAgentId)

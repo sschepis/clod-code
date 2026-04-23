@@ -586,43 +586,6 @@ export default function SettingsApp() {
           </Field>
         </section>
 
-        <div className="flex items-center gap-2 mt-8 mb-4 border-b border-vscode-widgetBorder pb-2">
-          <h2 className="text-sm font-semibold text-vscode-editorFg uppercase tracking-wider">AlephNet Integration</h2>
-        </div>
-        <div className="space-y-4">
-          <Field label="">
-            <label className="flex items-center gap-2 text-sm text-vscode-editorFg cursor-pointer">
-              <input
-                type="checkbox"
-                checked={value('alephnet')?.enabled ?? false}
-                onChange={e => update('alephnet', { ...value('alephnet'), enabled: e.target.checked })}
-                className="checkbox"
-              />
-              Enable local AlephNet Node (Semantic mesh & GMF)
-            </label>
-          </Field>
-          {value('alephnet')?.enabled && (
-            <div className="grid grid-cols-2 gap-4 pl-6 border-l-2 border-vscode-widgetBorder">
-              <Field label="Port">
-                <input
-                  type="number"
-                  value={value('alephnet')?.port ?? 31337}
-                  onChange={e => update('alephnet', { ...value('alephnet'), port: parseInt(e.target.value, 10) || 31337 })}
-                  className="input"
-                />
-              </Field>
-              <Field label="Node ID (optional)">
-                <input
-                  type="text"
-                  value={value('alephnet')?.nodeId ?? ''}
-                  onChange={e => update('alephnet', { ...value('alephnet'), nodeId: e.target.value })}
-                  className="input"
-                  placeholder="Leave empty for auto-generated"
-                />
-              </Field>
-            </div>
-          )}
-        </div>
         </div>
       </div>
 

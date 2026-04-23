@@ -26,9 +26,10 @@ export const COMMANDS = {
   EXPLORER_RERUN_TASK: 'obotovs.explorer.rerunTask',
   EXPLORER_FOCUS_TASK: 'obotovs.explorer.focusTask',
   INTERRUPT: 'obotovs.interrupt',
-  // AlephNet explorer commands
-  ALEPHNET_OPEN_PROFILE: 'obotovs.alephnet.openProfile',
-  ALEPHNET_REFRESH: 'obotovs.alephnet.refresh',
+  SURFACE_REFRESH: 'obotovs.surface.refresh',
+  SURFACE_VIEW_SOURCE: 'obotovs.surface.viewSource',
+  SURFACE_INSPECT: 'obotovs.surface.inspect',
+  SURFACE_OPEN_IN_BROWSER: 'obotovs.surface.openInBrowser',
 } as const;
 
 export const ENV_KEY_MAP: Record<string, string> = {

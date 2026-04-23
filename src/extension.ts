@@ -7,6 +7,7 @@ import { ChatPanelManager } from './vscode-integration/chat-panel-manager';
 import { ChatPanel } from './vscode-integration/chat-panel';
 import { Orchestrator } from './agent/orchestrator';
 import { SessionStore } from './agent/session-store';
+import { DecorationManager } from './tools';
 import { getSettings, onSettingsChanged } from './config/settings';
 import { migrateSettingsIfNeeded, autoDetectProviders } from './config/settings-migration';
 import { AiFileTracker } from './vscode-integration/ai-file-tracker';
@@ -103,16 +104,6 @@ export async function activate(context: vscode.ExtensionContext) {
     permissionMode: settings.permissionMode,
   });
 
-  try {
-    const { ensureAlephNetNode, stopAlephNetNode } = require('./config/alephnet-manager');
-    if (settings.alephnet?.enabled) {
-      ensureAlephNetNode().catch((e: any) => logger.warn('Failed to start AlephNet node in background:', e));
-    }
-    context.subscriptions.push({ dispose: () => stopAlephNetNode() });
-  } catch (err) {
-    logger.warn('AlephNet node init failed', err);
-  }
-
   // 6. Create the orchestrator (non-blocking — uses try/catch)
   if (sidebar && sessionStore) {
     try {
@@ -139,6 +130,16 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.registerFileDecorationProvider(fileTracker),
         fileTracker,
       );
+      // AI diagnostics collection — agent can publish findings to Problems panel
+      const obotoDiagnostics = vscode.languages.createDiagnosticCollection('oboto');
+      context.subscriptions.push(obotoDiagnostics);
+      orchestrator.setDiagnosticCollection(obotoDiagnostics);
+
+      // Decoration manager — agent can add inline highlights/annotations
+      const decorationManager = new DecorationManager();
+      context.subscriptions.push(decorationManager);
+      orchestrator.setDecorationManager(decorationManager);
+
       orchestrator.setFileChangedCallback((filePath) => {
         fileTracker!.add(vscode.Uri.file(filePath));
       });
@@ -251,16 +252,6 @@ export async function activate(context: vscode.ExtensionContext) {
             await orchestrator?.recreateAgent(newSettings);
           } catch (err) {
             logger.error('Failed to recreate agent after settings change', err);
-          }
-          try {
-            const { ensureAlephNetNode, stopAlephNetNode } = require('./config/alephnet-manager');
-            if (newSettings.alephnet?.enabled) {
-              ensureAlephNetNode().catch((e: any) => logger.warn('Failed to start AlephNet node', e));
-            } else {
-              stopAlephNetNode();
-            }
-          } catch (err) {
-            logger.error('Failed to handle AlephNet settings change', err);
           }
         }, 500);
       })

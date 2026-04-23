@@ -44,6 +44,7 @@ export interface SurfaceManagerOptions {
 export class SurfaceManager {
   private panels = new Map<string, SurfacePanel>();
   private watcher?: vscode.FileSystemWatcher;
+  private activeSurfaceName: string | null = null;
 
   constructor(private readonly opts: SurfaceManagerOptions) {
     this.installWatcher();
@@ -123,8 +124,13 @@ export class SurfaceManager {
       filePath: file,
       workspaceRoot: root,
       routesUrl: this.opts.getRoutesUrl(),
-      onDispose: () => { this.panels.delete(name); this.opts.onSurfaceClosed?.(name); },
+      onDispose: () => {
+        this.panels.delete(name);
+        if (this.activeSurfaceName === name) this.activeSurfaceName = null;
+        this.opts.onSurfaceClosed?.(name);
+      },
       onError: this.opts.onSurfaceError,
+      onDidBecomeActive: () => { this.activeSurfaceName = name; },
     });
     this.panels.set(name, panel);
     return { ok: true };
@@ -145,6 +151,11 @@ export class SurfaceManager {
     if (!result.ok && result.reason) {
       vscode.window.showErrorMessage(result.reason);
     }
+  }
+
+  getActiveSurface(): SurfacePanel | null {
+    if (!this.activeSurfaceName) return null;
+    return this.panels.get(this.activeSurfaceName) ?? null;
   }
 
   /** Capture the rendered output of a surface as a PNG buffer. */

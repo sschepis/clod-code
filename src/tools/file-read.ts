@@ -17,15 +17,17 @@ export function createFileReadHandler() {
       }
       const lines = text.split('\n');
 
-      const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0;
+      const rawOffset = typeof kwargs.offset === 'number' ? kwargs.offset : 1;
+      const offset = Math.max(1, rawOffset);
       const limit = typeof kwargs.limit === 'number' ? kwargs.limit : 2000;
+      const startIdx = offset - 1;
 
-      const sliced = lines.slice(offset, offset + limit);
-      const numbered = sliced.map((line, i) => `${String(offset + i + 1).padStart(5)}\t${line}`).join('\n');
+      const sliced = lines.slice(startIdx, startIdx + limit);
+      const numbered = sliced.map((line, i) => `${String(offset + i).padStart(5)}\t${line}`).join('\n');
 
       let result = numbered;
-      if (offset > 0 || offset + limit < lines.length) {
-        result += `\n\n[Showing lines ${offset + 1}-${Math.min(offset + limit, lines.length)} of ${lines.length}]`;
+      if (startIdx > 0 || startIdx + limit < lines.length) {
+        result += `\n\n[Showing lines ${offset}-${Math.min(offset + limit - 1, lines.length)} of ${lines.length}]`;
       }
 
       return result;

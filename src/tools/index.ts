@@ -80,7 +80,7 @@ export {
   createRefactorPipelineHandler,
   createRefactorRegexHandler,
 } from './refactor-ops';
-export { createChatSetTitleHandler } from './chat-title';
+export { createChatSetTitleHandler, createChatSetNameHandler } from './chat-title';
 export type { ChatTitleDeps } from './chat-title';
 export { createSpeakHandler } from './elevenlabs-tts';
 export type { ElevenLabsTtsDeps } from './elevenlabs-tts';
@@ -103,7 +103,19 @@ export {
   createCodeSignatureHandler,
   createCodeCompletionsHandler,
   createCodeInlayHintsHandler,
+  createCodeTypeDefinitionHandler,
+  createCodeImplementationHandler,
+  createCodeDeclarationHandler,
+  createCodeFoldingHandler,
+  createCodeSelectionRangesHandler,
+  createCodeImpactHandler,
+  createCodeDataflowHandler,
+  createCodeSemanticDiffHandler,
+  createCodeDiagnosticsPublishHandler,
+  createCodeDecorateHandler,
+  DecorationManager,
 } from './code-intel';
+export type { DiagnosticPublishDeps, DecorationDeps } from './code-intel';
 export { createCodeMapHandler, CodeMap } from './code-map';
 export type { CodeMapDeps } from './code-map';
 export {
@@ -124,3 +136,15 @@ export {
   createProjectArchiveHandler,
 } from './project-ops';
 export type { ProjectToolDeps } from './project-ops';
+export { createWebSearchHandler } from './web-search';
+export { createWebFetchHandler } from './web-fetch';
+export {
+  createWebBrowseHandler,
+  createWebClickHandler,
+  createWebTypeHandler,
+  createWebScreenshotHandler,
+  createWebEvalHandler,
+  createWebCloseHandler,
+  BrowserSession,
+} from './web-browse';
+export type { WebBrowseDeps } from './web-browse';

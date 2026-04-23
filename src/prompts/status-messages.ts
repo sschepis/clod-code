@@ -2,6 +2,8 @@ export const WORKING_ON_PLAN = 'One moment, working on a plan…';
 
 export const LOOKING_INTO_THAT = 'One sec, looking into that…';
 
+export const STOPPING_WORK = "I'll stop working right away.";
+
 export const AGENT_INITIALIZING =
   'Agent is still initializing. Please wait a moment and try again.';
 
