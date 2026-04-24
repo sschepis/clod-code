@@ -197,8 +197,39 @@ export class SessionStore {
     return this.tryReadJson(path.join(this.storageDir, `${panelId}.memory.json`));
   }
 
+  // ── Per-conversation routing persistence ────────────────────────────
+
+  async saveRouting(routing: unknown): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${this.windowId}.routing.json`);
+    const data = JSON.stringify(routing, null, 2);
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), new TextEncoder().encode(data));
+  }
+
+  async loadRouting(): Promise<unknown | undefined> {
+    const myPath = path.join(this.storageDir, `${this.windowId}.routing.json`);
+    const mine = await this.tryReadJson(myPath);
+    if (mine) return mine;
+    const lastId = this.workspaceState.get<string>(LAST_WINDOW_ID_KEY);
+    if (lastId && lastId !== this.windowId) {
+      return await this.tryReadJson(path.join(this.storageDir, `${lastId}.routing.json`));
+    }
+    return undefined;
+  }
+
+  async savePanelRouting(panelId: string, routing: unknown): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${panelId}.routing.json`);
+    const data = JSON.stringify(routing, null, 2);
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), new TextEncoder().encode(data));
+  }
+
+  async loadPanelRouting(panelId: string): Promise<unknown | undefined> {
+    return this.tryReadJson(path.join(this.storageDir, `${panelId}.routing.json`));
+  }
+
   async deletePanel(panelId: string): Promise<void> {
-    for (const suffix of ['.json', '.memory.json']) {
+    for (const suffix of ['.json', '.memory.json', '.routing.json']) {
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(path.join(this.storageDir, `${panelId}${suffix}`)));
       } catch { /* may not exist */ }

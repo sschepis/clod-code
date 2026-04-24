@@ -392,14 +392,27 @@ export function registerCommands(
         vscode.window.showWarningMessage('No task prompt available to re-run.');
         return;
       }
-      await orchestrator.submitToAgent('foreground', `Re-run the following task:\n\n${agent.task}`);
+      const targetId = chatPanelManager?.getActivePanelId();
+      if (targetId) {
+        chatPanelManager?.focusPanel(targetId);
+        await orchestrator.submitToAgent(targetId, `Re-run the following task:\n\n${agent.task}`);
+      } else {
+        await vscode.commands.executeCommand('obotovs.chatPanel.focus');
+        await orchestrator.submitToAgent('foreground', `Re-run the following task:\n\n${agent.task}`);
+      }
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.EXPLORER_FOCUS_TASK, (node: ExplorerNode) => {
-      if (node.agentId && sidebar) {
-        sidebar.postMessage({ type: 'agents_sync', agents: orchestrator?.getAgentSummaries() ?? [], focusedAgentId: node.agentId });
+      if (!node.agentId) return;
+      const syncMsg = { type: 'agents_sync' as const, agents: orchestrator?.getAgentSummaries() ?? [], focusedAgentId: node.agentId };
+      const activePanelId = chatPanelManager?.getActivePanelId();
+      const activePanel = activePanelId ? chatPanelManager?.getPanel(activePanelId) : undefined;
+      if (activePanel) {
+        activePanel.postMessage(syncMsg);
+      } else if (sidebar) {
+        sidebar.postMessage(syncMsg);
       }
     })
   );

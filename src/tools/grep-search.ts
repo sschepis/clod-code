@@ -1,8 +1,14 @@
 import { execSync } from 'child_process';
 import * as vscode from 'vscode';
 import * as path from 'path';
+import type { ShellDeps } from './shell';
 
-export function createGrepSearchHandler() {
+function resolveShell(deps: ShellDeps): string {
+  const configured = deps.getShell();
+  return configured || process.env.SHELL || '/bin/sh';
+}
+
+export function createGrepSearchHandler(deps: ShellDeps) {
   return async (kwargs: Record<string, unknown>): Promise<string> => {
     const pattern = String(kwargs.pattern || '');
     if (!pattern) return '[ERROR] Missing required argument: pattern. Provide a regex pattern to search for in file contents (e.g. "function\\s+handleClick", "TODO|FIXME", "import.*from"). Use type or glob to filter file types.';
@@ -31,11 +37,13 @@ export function createGrepSearchHandler() {
         `'${searchPath}'`,
       ].filter(Boolean).join(' ');
 
+      const shell = resolveShell(deps);
       const output = execSync(`${rgPath} ${args}`, {
         timeout: 15_000,
         maxBuffer: 1024 * 1024,
         encoding: 'utf-8',
         cwd: searchPath,
+        shell,
       });
 
       return output.trim() || `[INFO] No matches found for '${pattern}'. Try: broader pattern, case_insensitive=true, or remove type/glob filters. Use search/glob to find files by name instead of content.`;
@@ -61,7 +69,7 @@ function findRipgrep(): string {
       vscode.env.appRoot,
       'node_modules', '@vscode', 'ripgrep', 'bin', 'rg'
     );
-    execSync(`"${vscodeRg}" --version`, { stdio: 'pipe' });
+    execSync(`"${vscodeRg}" --version`, { stdio: 'pipe', shell: process.env.SHELL || '/bin/sh' });
     return `"${vscodeRg}"`;
   } catch {
     // Fall back to system ripgrep

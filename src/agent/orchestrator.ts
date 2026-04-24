@@ -19,7 +19,7 @@ import type { AgentRuntime } from '@sschepis/as-agent';
 const MESSAGE_ROLE_USER = 1;
 
 import type { SidebarProvider } from '../vscode-integration/sidebar-provider';
-import type { ObotovsSettings } from '../config/settings';
+import type { ObotovsSettings, PromptRole, RouteAssignment } from '../config/settings';
 import type {
   WebviewToExtMessage, ExtToWebviewMessage, SessionEvent,
   ObjectSnapshot, SurfaceInfo, RouteInfo, SkillInfo, ProjectInfo,
@@ -132,6 +132,7 @@ export class Orchestrator {
   private pendingSidebarSync = false;
   private routingMode: RoutingMode = 'dual';
   private baseRouting: ObotovsSettings['routing'] | null = null;
+  private routingOverrides = new Map<string, Partial<Record<PromptRole, RouteAssignment>>>();
   private onFileChanged?: (filePath: string) => void;
   private onSessionCleared?: () => void;
   private diagnosticCollection?: vscode.DiagnosticCollection;
@@ -628,7 +629,17 @@ export class Orchestrator {
       this.settings = newSettings;
       this.manager.updateSettings(newSettings);
     }
-    await this.manager.recreateForeground(this.settings);
+    const fgSettings = this.settingsForAgent(FOREGROUND_AGENT_ID);
+    await this.manager.recreateForeground(fgSettings);
+  }
+
+  private settingsForAgent(agentId: string): ObotovsSettings {
+    const override = this.routingOverrides.get(agentId);
+    if (!override) return this.settings;
+    return {
+      ...this.settings,
+      routing: { ...this.settings.routing, ...override },
+    };
   }
 
   private applyRoutingModeOverrides(settings: ObotovsSettings): ObotovsSettings {
@@ -875,9 +886,18 @@ export class Orchestrator {
       }
     }
 
+    try {
+      const savedRouting = await this.sessionStore.loadPanelRouting(panelId);
+      if (savedRouting && typeof savedRouting === 'object') {
+        this.routingOverrides.set(panelId, savedRouting as Partial<Record<PromptRole, RouteAssignment>>);
+      }
+    } catch (err) {
+      logger.warn(`Failed to load panel routing for ${panelId}`, err);
+    }
+
     const host = new AgentHost({
       id: panelId,
-      settings: this.settings,
+      settings: this.settingsForAgent(panelId),
       router,
       agentRuntime: this.agentRuntime,
       initialSession: session,
@@ -960,6 +980,7 @@ export class Orchestrator {
         await this.sessionStore.savePanel(panelId, session);
       }
     }
+    this.routingOverrides.delete(panelId);
     this.manager.disposeInteractive(panelId);
     this.browserSessions.get(panelId)?.dispose();
     this.browserSessions.delete(panelId);
@@ -982,7 +1003,6 @@ export class Orchestrator {
     const { router } = this.buildToolTreeFor(FOREGROUND_AGENT_ID);
     const session = (await this.sessionStore.load()) ?? undefined;
 
-    // Load conversation memory for the foreground agent (if any was saved)
     if (this.memoryManager) {
       try {
         const memJson = await this.sessionStore.loadMemory();
@@ -992,9 +1012,18 @@ export class Orchestrator {
       }
     }
 
+    try {
+      const savedRouting = await this.sessionStore.loadRouting();
+      if (savedRouting && typeof savedRouting === 'object') {
+        this.routingOverrides.set(FOREGROUND_AGENT_ID, savedRouting as Partial<Record<PromptRole, RouteAssignment>>);
+      }
+    } catch (err) {
+      logger.warn('Failed to load foreground routing override', err);
+    }
+
     const host = new AgentHost({
       id: FOREGROUND_AGENT_ID,
-      settings: this.settings,
+      settings: this.settingsForAgent(FOREGROUND_AGENT_ID),
       router,
       agentRuntime: this.agentRuntime,
       initialSession: session,
@@ -1587,27 +1616,35 @@ export class Orchestrator {
 
       case 'change_model': {
         const role = msg.role ?? 'executor';
-        const newSettings: ObotovsSettings = {
-          ...this.settings,
-          routing: {
-            ...this.settings.routing,
-            [role]: { providerId: msg.provider, model: msg.model },
-          },
+        const routeAssignment: RouteAssignment = { providerId: msg.provider, model: msg.model };
+        const changeTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
+
+        const existingOverride = this.routingOverrides.get(changeTarget) ?? {};
+        const override: Partial<Record<PromptRole, RouteAssignment>> = {
+          ...existingOverride,
+          [role]: routeAssignment,
         };
         if (this.routingMode === 'local-only') {
-          const mirrored = { providerId: msg.provider, model: msg.model };
-          newSettings.routing = { ...newSettings.routing, triage: mirrored, executor: mirrored };
+          override.triage = routeAssignment;
+          override.executor = routeAssignment;
         }
-        this.settings = newSettings;
+        this.routingOverrides.set(changeTarget, override);
+
+        const savePromise = changeTarget === FOREGROUND_AGENT_ID
+          ? this.sessionStore.saveRouting(override)
+          : this.sessionStore.savePanelRouting(changeTarget, override);
+        savePromise.catch(err => logger.warn(`Failed to save routing for ${changeTarget}`, err));
+
         if (this.baseRouting) {
-          this.baseRouting = { ...this.baseRouting, [role]: { providerId: msg.provider, model: msg.model } };
+          this.baseRouting = { ...this.baseRouting, [role]: routeAssignment };
         }
-        const changeTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
+
+        const agentSettings = this.settingsForAgent(changeTarget);
         if (changeTarget === FOREGROUND_AGENT_ID) {
           await this.recreateAgent();
         } else {
           const rec = this.manager.get(changeTarget);
-          if (rec?.host) await rec.host.recreate(newSettings);
+          if (rec?.host) await rec.host.recreate(agentSettings);
         }
         break;
       }
@@ -1617,15 +1654,16 @@ export class Orchestrator {
         if (!this.baseRouting && msg.mode !== 'dual') {
           this.baseRouting = { ...this.settings.routing };
         }
-        const newSettings = this.applyRoutingModeOverrides({ ...this.settings });
-        this.settings = newSettings;
+        const newModeSettings = this.applyRoutingModeOverrides({ ...this.settings });
+        this.settings = newModeSettings;
         const routingTarget = msg.agentId ?? FOREGROUND_AGENT_ID;
         this.bridge.setRoutingMode(routingTarget, msg.mode);
+        const targetSettings = this.settingsForAgent(routingTarget);
         if (routingTarget === FOREGROUND_AGENT_ID) {
           await this.recreateAgent();
         } else {
           const rec = this.manager.get(routingTarget);
-          if (rec?.host) await rec.host.recreate(newSettings);
+          if (rec?.host) await rec.host.recreate(targetSettings);
         }
         break;
       }
@@ -1655,6 +1693,8 @@ export class Orchestrator {
         if (clearId === FOREGROUND_AGENT_ID) {
           this.setContext('obotovs.hasSession', false);
           this.onSessionCleared?.();
+          this.routingOverrides.delete(FOREGROUND_AGENT_ID);
+          this.sessionStore.saveRouting(null).catch(err => logger.warn('Failed to clear foreground routing', err));
           const fgRec = this.manager.get(FOREGROUND_AGENT_ID);
           if (fgRec?.host) await fgRec.host.recreateClean(this.settings);
           const s = fgRec?.host.getSession();
@@ -1664,6 +1704,8 @@ export class Orchestrator {
         } else {
           const rec = this.manager.get(clearId);
           if (rec?.host) {
+            this.routingOverrides.delete(clearId);
+            this.sessionStore.savePanelRouting(clearId, null).catch(err => logger.warn(`Failed to clear panel routing for ${clearId}`, err));
             await rec.host.recreateClean(this.settings);
             const s = rec.host.getSession();
             if (s) await this.sessionStore.savePanel(clearId, s);

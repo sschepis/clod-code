@@ -220,7 +220,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             case_insensitive: { type: 'boolean', description: 'Case insensitive search' },
             max_results: { type: 'number', description: 'Max matches', default: 50 },
           },
-          handler: createGrepSearchHandler(),
+          handler: createGrepSearchHandler(deps.shell),
         });
     })
 
