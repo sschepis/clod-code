@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SidebarProvider } from './vscode-integration/sidebar-provider';
 import { StatusBar } from './vscode-integration/status-bar';
 import { ExplorerProvider } from './vscode-integration/explorer-provider';
+import { OpenClawContributor } from './vscode-integration/openclaw-contributor';
 import { registerCommands } from './vscode-integration/commands';
 import { ChatPanelManager } from './vscode-integration/chat-panel-manager';
 import { ChatPanel } from './vscode-integration/chat-panel';
@@ -183,6 +184,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let explorerProvider: ExplorerProvider | undefined;
   try {
     explorerProvider = new ExplorerProvider();
+    explorerProvider.registerContributor(new OpenClawContributor());
     if (orchestrator) {
       explorerProvider.setAgentProvider({
         listAll: () => orchestrator!.getAgentSummaries(),
