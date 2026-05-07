@@ -24,7 +24,6 @@ import { FOREGROUND_AGENT_ID } from '../shared/message-types';
 import { AgentHost, type HostEvent } from './agent-host';
 import type { WebviewBridge } from './webview-bridge';
 import type { PermissionModeLabel } from './permission-prompter';
-import { buildToolTree, type ToolTreeDeps } from './tool-tree';
 import { logger } from '../shared/logger';
 import { getErrorMessage } from '../shared/errors';
 import type { SkillManager } from '../skills/skill-manager';
@@ -274,7 +273,7 @@ export class AgentManager {
 
     // Depth-limited recursive spawning
     const maxDepth = this.settings.maxAgentNestingDepth ?? 2;
-    if (lineage.size > maxDepth) {
+    if (lineage.size >= maxDepth) {
       return {
         ok: false,
         error:

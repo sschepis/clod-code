@@ -15,6 +15,7 @@ import { ObotoCodeLensProvider, registerCodeLensCommands } from './vscode-integr
 import { registerQuickTask } from './vscode-integration/quick-task';
 import { logger } from './shared/logger';
 import { currentWindowId, registerWindow, unregisterWindow } from './shared/window-id';
+import { seedTemplatesIfNeeded } from './skills/seed-templates';
 
 export async function activate(context: vscode.ExtensionContext) {
   // 1. Initialize the dedicated output channel for logging FIRST
@@ -35,6 +36,8 @@ export async function activate(context: vscode.ExtensionContext) {
     windowId,
     pid: process.pid,
   });
+
+  seedTemplatesIfNeeded(context.extensionPath);
 
   // Wrap each step in try/catch so one failure doesn't block the rest.
   // Commands MUST be registered even if agent init fails, so users can

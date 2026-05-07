@@ -39,12 +39,17 @@ export interface SurfaceManagerOptions {
   onSubmitToAgent?: (text: string, agentId?: string) => void;
   /** Called when a surface requests to execute a tool. */
   onExecuteTool?: (tool: string, kwargs: Record<string, unknown>) => Promise<any>;
+  /** Called when a surface requests LLM streaming. */
+  onLlmStream?: (prompt: string, modelType: 'local' | 'remote', onChunk: (chunk: string) => void) => Promise<string>;
+  /** Called when a surface emits a channel message. */
+  onChannelMessage?: (surfaceName: string, channel: string, data: unknown) => void;
 }
 
 export class SurfaceManager {
   private panels = new Map<string, SurfacePanel>();
   private watcher?: vscode.FileSystemWatcher;
   private activeSurfaceName: string | null = null;
+  private navigationStack: string[] = [];
 
   constructor(private readonly opts: SurfaceManagerOptions) {
     this.installWatcher();
@@ -130,7 +135,18 @@ export class SurfaceManager {
         this.opts.onSurfaceClosed?.(name);
       },
       onError: this.opts.onSurfaceError,
+      onSubmitToAgent: this.opts.onSubmitToAgent,
+      onExecuteTool: this.opts.onExecuteTool,
+      onLlmStream: this.opts.onLlmStream,
+      onChannelMessage: this.opts.onChannelMessage,
       onDidBecomeActive: () => { this.activeSurfaceName = name; },
+      onOpenSurface: (target: string) => {
+        if (target === '__back__') {
+          this.navigateBack();
+        } else {
+          this.navigateTo(target);
+        }
+      },
     });
     this.panels.set(name, panel);
     return { ok: true };
@@ -163,6 +179,36 @@ export class SurfaceManager {
     const panel = this.panels.get(name);
     if (!panel) throw new Error(`Surface "${name}" is not open. Open it first with surface/open.`);
     return panel.capture();
+  }
+
+  /** Push a message to a specific surface on a named channel. */
+  pushToSurface(name: string, channel: string, data: unknown): boolean {
+    const panel = this.panels.get(name);
+    if (!panel) return false;
+    panel.pushMessage(channel, data);
+    return true;
+  }
+
+  /** Broadcast a message to all open surfaces on a named channel. */
+  broadcastToSurfaces(channel: string, data: unknown): void {
+    for (const panel of this.panels.values()) panel.pushMessage(channel, data);
+  }
+
+  /** Navigate from the active surface to another surface, pushing to the nav stack. */
+  navigateTo(name: string): void {
+    const prev = this.activeSurfaceName;
+    const result = this.openPanel(name, false);
+    if (result.ok && prev) {
+      this.navigationStack.push(prev);
+    }
+  }
+
+  /** Navigate back to the previous surface in the stack. */
+  navigateBack(): void {
+    const prev = this.navigationStack.pop();
+    if (prev) {
+      this.openPanel(prev, false);
+    }
   }
 
   /** Called by the orchestrator when the routes server base URL changes. */

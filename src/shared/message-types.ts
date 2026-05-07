@@ -378,7 +378,7 @@ export type WebviewToExtMessage =
   | { type: 'delete_event'; agentId?: string; eventId: string }
   | { type: 'edit_and_resubmit'; agentId?: string; eventId: string; text: string }
   | { type: 'slash_command'; agentId?: string; command: string; args: string }
-  | { type: 'focus_agent'; agentId: string }
+  | { type: 'focus_agent'; agentId: string; sourcePanelId?: string }
   | { type: 'cancel_agent'; agentId: string }
   | { type: 'new_chat' }
   // ── Object Manager ───────────────────────────────────────────────────

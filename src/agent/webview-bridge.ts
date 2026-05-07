@@ -22,6 +22,7 @@ import type {
   ModelInfo,
   AgentSummary,
   AgentStatus,
+  AgentPhase,
   RoutingMode,
 } from '../shared/message-types';
 import { FOREGROUND_AGENT_ID } from '../shared/message-types';
@@ -59,8 +60,13 @@ export class WebviewBridge {
   private targets = new Map<string, WebviewTarget>();
   private sliceChangeListeners: SliceChangeListener[] = [];
   private criticalSliceListeners: SliceChangeListener[] = [];
+  private permissionToolNames = new Map<string, string>();
 
   constructor() {}
+
+  getPermissionToolName(_agentId: string, eventId: string): string | undefined {
+    return this.permissionToolNames.get(eventId);
+  }
 
   onSliceChanged(listener: SliceChangeListener): void {
     this.sliceChangeListeners.push(listener);
@@ -239,6 +245,30 @@ export class WebviewBridge {
     this.post(msg);
   }
 
+  sendSyncToTarget(agentId: string, targetId: string): void {
+    const slice = this.slices.get(agentId);
+    if (!slice) return;
+    const target = this.targets.get(targetId);
+    if (!target) return;
+    const events =
+      slice.events.length > MAX_EVENTS_PER_SLICE
+        ? slice.events.slice(-MAX_EVENTS_PER_SLICE)
+        : slice.events;
+    target.postMessage({
+      type: 'sync',
+      agentId,
+      events,
+      phase: slice.phase,
+      cost: slice.cost,
+      activeModel: slice.activeModel,
+      triageModel: slice.triageModel,
+      routingMode: slice.routingMode,
+      mode: slice.mode,
+      agents: this.listAgentSummaries(),
+      focusedAgentId: agentId,
+    });
+  }
+
   sendAgentsSync(): void {
     this.post({
       type: 'agents_sync',
@@ -381,10 +411,13 @@ export class WebviewBridge {
     }
 
     switch (event.type) {
-      case 'phase':
-        slice.phase = { phase: event.phase as any, message: event.message };
-        this.post({ type: 'phase', agentId, phase: slice.phase.phase, message: event.message });
+      case 'phase': {
+        const KNOWN_PHASES = new Set(['idle','request','precheck','planning','thinking','tools','validation','memory','continuation','error','doom','cancel','complete']);
+        const phase = KNOWN_PHASES.has(event.phase) ? event.phase as AgentPhase : 'thinking' as AgentPhase;
+        slice.phase = { phase, message: event.message };
+        this.post({ type: 'phase', agentId, phase, message: event.message });
         break;
+      }
 
       case 'triage':
         this.appendEvent(agentId, {
@@ -539,6 +572,16 @@ export class WebviewBridge {
 
       case 'permission_denied': {
         const eventId = `perm-${Date.now()}-${rand()}`;
+        this.permissionToolNames.set(eventId, event.toolName);
+        this.appendEvent(agentId, {
+          id: eventId,
+          role: 'permission',
+          toolName: event.toolName,
+          toolInput: event.toolInput,
+          description: event.reason,
+          status: 'pending',
+          timestamp: now(),
+        } as any);
         this.post({
           type: 'permission_request',
           agentId,

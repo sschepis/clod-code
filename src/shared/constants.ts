@@ -25,6 +25,8 @@ export const COMMANDS = {
   EXPLORER_COPY_TASK_RESULT: 'obotovs.explorer.copyTaskResult',
   EXPLORER_RERUN_TASK: 'obotovs.explorer.rerunTask',
   EXPLORER_FOCUS_TASK: 'obotovs.explorer.focusTask',
+  PROJECT_INIT: 'obotovs.project.init',
+  PROJECT_STATUS: 'obotovs.project.status',
   INTERRUPT: 'obotovs.interrupt',
   SURFACE_REFRESH: 'obotovs.surface.refresh',
   SURFACE_VIEW_SOURCE: 'obotovs.surface.viewSource',

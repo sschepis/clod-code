@@ -101,8 +101,14 @@ export class AgentHost {
   private pendingInput: string | null = null;
 
   // ── Commentary engine state ──
-  private localProvider?: import('@sschepis/llm-wrapper').BaseProvider;
-  private localModelName?: string;
+  public remoteProvider?: import('@sschepis/llm-wrapper').BaseProvider;
+  public remoteModelName?: string;
+  private _localProvider?: import('@sschepis/llm-wrapper').BaseProvider;
+  private _localModelName?: string;
+
+  getLocalProvider() { return this._localProvider; }
+  getLocalModelName() { return this._localModelName; }
+
   private toolLog: ToolSnapshot[] = [];
   private consecutiveSilentRounds = 0;
   private commentaryInFlight = false;
@@ -257,6 +263,7 @@ export class AgentHost {
   // ── Internals ─────────────────────────────────────────────────────────
 
   private async createAgent(existingSession?: Session): Promise<void> {
+    if (this.disposed) return;
     try {
       const { ObotoAgent, createEmptySession } = await dynamicImport<
         typeof import('@sschepis/oboto-agent')
@@ -266,9 +273,10 @@ export class AgentHost {
       this.triageModel = this.computeTriageModel();
 
       const providers = await createProviders(this.settings, this.role);
-      this.localProvider = createDWIMProvider(providers.local);
-      this.localModelName = providers.localModelName;
-      const remoteProvider = createDWIMProvider(providers.remote);
+      this._localProvider = createDWIMProvider(providers.local);
+      this._localModelName = providers.localModelName;
+      this.remoteProvider = createDWIMProvider(providers.remote);
+      this.remoteModelName = providers.remoteModelName;
       const systemPrompt =
         this.systemPromptOverride ??
         buildSystemPrompt({
@@ -282,8 +290,8 @@ export class AgentHost {
       this.permissionPolicy = createPermissionPolicy(permMode);
 
       this.agent = new ObotoAgent({
-        localModel: this.localProvider as any,
-        remoteModel: remoteProvider as any,
+        localModel: this._localProvider as any,
+        remoteModel: this.remoteProvider as any,
         localModelName: providers.localModelName,
         remoteModelName: providers.remoteModelName,
         router: this.router as any,
@@ -447,11 +455,11 @@ export class AgentHost {
   // ── Commentary engine ─────────────────────────────────────────────────
 
   private requestCommentary(iteration: number, totalToolCalls: number): void {
-    if (!this.localProvider || !this.localModelName) return;
+    if (!this._localProvider || !this._localModelName) return;
     this.commentaryInFlight = true;
     const frame = this.buildStateFrame(iteration, totalToolCalls);
-    const provider = this.localProvider;
-    const model = this.localModelName;
+    const provider = this._localProvider;
+    const model = this._localModelName;
 
     provider.chat({
       model,
@@ -462,10 +470,14 @@ export class AgentHost {
         },
         { role: 'user' as const, content: frame },
       ],
-      max_tokens: 120,
+      max_tokens: 250,
     }).then((res) => {
       this.commentaryInFlight = false;
-      const text = (res?.choices?.[0]?.message?.content as string)?.trim();
+      let text = (res?.choices?.[0]?.message?.content as string)?.trim();
+      if (text && !/[.!?)]$/.test(text)) {
+        const lastSentence = text.lastIndexOf('. ');
+        text = lastSentence > 0 ? text.slice(0, lastSentence + 1) : '';
+      }
       if (text && this.isProcessing) {
         this.consecutiveSilentRounds = 0;
         this.emit({ type: 'commentary', text });

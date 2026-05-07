@@ -45,6 +45,7 @@ import { PeerManager } from '../peers/peer-manager';
 import { DispatchRegistry } from '../peers/dispatch-registry';
 import { PeerAskRegistry } from '../peers/peer-ask-registry';
 import { MemoryManager } from './memory/memory-manager';
+import { ServiceRegistry } from '../services/service-registry';
 import type { AgentSyncMonitor } from './sync';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -67,6 +68,7 @@ import {
   INTER_AGENT_NO_TEXT_RESPONSE,
   surfaceAutoFixPrompt,
   surfaceCrashedNotice,
+  classifyError,
   WORKING_ON_PLAN,
   LOOKING_INTO_THAT,
   STOPPING_WORK,
@@ -116,9 +118,11 @@ export class Orchestrator {
   private readonly peerAsks: PeerAskRegistry;
   private readonly windowId: string;
   private memoryManager?: MemoryManager;
+  private readonly serviceRegistry: ServiceRegistry;
   private syncMonitor?: AgentSyncMonitor;
   private surfaceFixState = new Map<string, { lastAttempt: number; attempts: number; errorSignature: string }>();
   private pendingVerifications = new Map<string, { errorSignature: string; timer: NodeJS.Timeout }>();
+  private surfaceHealthListener?: (surfaceName: string, channel: string, data: unknown) => void;
   private objectsWatcher?: vscode.FileSystemWatcher;
   private objectsBroadcastTimer?: NodeJS.Timeout;
   private memoryChangeUnsubscribe?: () => void;
@@ -138,6 +142,7 @@ export class Orchestrator {
   private diagnosticCollection?: vscode.DiagnosticCollection;
   private decorationManager?: import('../tools').DecorationManager;
   private browserSessions = new Map<string, BrowserSession>();
+  private gunStore?: import('../data/gun-store').GunStore;
 
   private setContext(key: string, value: boolean): void {
     vscode.commands.executeCommand('setContext', key, value);
@@ -202,8 +207,60 @@ export class Orchestrator {
         if (!agent) throw new Error('No foreground agent available to execute tools');
         return await agent.getRouter().execute(tool, kwargs);
       },
+      onLlmStream: async (prompt, modelType, onChunk) => {
+        const host = this.manager.getForeground();
+        if (!host) throw new Error('No foreground agent available');
+        const provider = modelType === 'remote' ? host.remoteProvider : host.getLocalProvider();
+        const modelName = modelType === 'remote' ? host.remoteModelName : host.getLocalModelName();
+        if (!provider || !modelName) throw new Error('Provider not available');
+        let fullText = '';
+        for await (const chunk of provider.stream({
+          messages: [{ role: 'user', content: prompt }],
+          model: modelName
+        })) {
+          const text = chunk.choices?.[0]?.delta?.content;
+          if (text) {
+            fullText += text;
+            onChunk(text);
+          }
+        }
+        return fullText;
+      },
+      onChannelMessage: (surfaceName, channel, data) => {
+        logger.info(`[surface-channel] ${surfaceName}:${channel}`, data);
+        this.surfaceHealthListener?.(surfaceName, channel, data);
+      },
     });
     this.skillManager = new SkillManager();
+    this.serviceRegistry = new ServiceRegistry();
+
+    // Load custom services from settings
+    const customServices = (settings as any).services ?? {};
+    for (const [id, def] of Object.entries(customServices)) {
+      const d = def as { displayName?: string; envKeys?: string[]; category?: string; description?: string };
+      this.serviceRegistry.register({
+        id,
+        displayName: d.displayName ?? id,
+        description: d.description ?? `Custom service: ${id}`,
+        envKeys: d.envKeys ?? [],
+        category: (d.category as any) ?? 'api',
+      });
+    }
+
+    // Initialize Gun.js data store
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (wsRoot) {
+      try {
+        const { GunStore } = require('../data/gun-store');
+        this.gunStore = new GunStore({
+          workspaceRoot: wsRoot,
+          relayPeers: (settings as any).gunRelayPeers ?? [],
+        });
+      } catch (err) {
+        logger.warn('[gun-store] Failed to initialize', err);
+      }
+    }
+
     this.projectManager = new ProjectManager({
       onProjectChanged: () => this.scheduleObjectsBroadcast(),
     });
@@ -277,7 +334,7 @@ export class Orchestrator {
     });
 
     // Handle messages from webview
-    sidebar.onMessage((msg) => this.handleWebviewMessage(msg));
+    sidebar.onMessage((msg) => void this.handleWebviewMessage(msg));
 
     // Debounced UI events save — fires on every slice change (token, event, tool status, etc.)
     this.bridge.onSliceChanged((agentId) => this.scheduleUiEventsSave(agentId));
@@ -801,6 +858,7 @@ export class Orchestrator {
     this.surfaceFixState.clear();
 
     this.speechToText?.dispose();
+    this.gunStore?.dispose();
     void this.peerManager.stop();
     void this.routeManager.stop();
     this.surfaceManager.dispose();
@@ -809,7 +867,7 @@ export class Orchestrator {
     this.dispatches.dispose();
     this.peerAsks.dispose();
     void this.manager.dispose();
-    this.sessionStore.dispose();
+    void this.sessionStore.flush().finally(() => this.sessionStore.dispose());
     if (this.memoryManager) void this.memoryManager.dispose();
     this.syncMonitor?.dispose();
     if (this.memoryChangeUnsubscribe) this.memoryChangeUnsubscribe();
@@ -857,6 +915,11 @@ export class Orchestrator {
 
   async cancelAgent(agentId: string): Promise<void> {
     await this.manager.cancel(agentId, 'Cancelled from explorer');
+  }
+
+  async clearSession(agentId?: string): Promise<void> {
+    const msg = { type: 'clear_session' as const, agentId };
+    await (this as any).handleWebviewMessage(msg);
   }
 
   interrupt(): void {
@@ -991,7 +1054,11 @@ export class Orchestrator {
     if (msg.type === 'ready') {
       patched.panelAgentId = panelId;
     }
-    if (msg.type === 'focus_agent' || msg.type === 'cancel_agent') {
+    if (msg.type === 'focus_agent') {
+      patched.agentId = (msg as any).agentId;
+      patched.sourcePanelId = panelId;
+    }
+    if (msg.type === 'cancel_agent') {
       patched.agentId = (msg as any).agentId;
     }
     void this.handleWebviewMessage(patched as WebviewToExtMessage);
@@ -1351,6 +1418,22 @@ export class Orchestrator {
           return session;
         },
       },
+      data: this.gunStore ? { store: this.gunStore } : undefined,
+      codeRun: {
+        pushToSurface: (name, channel, data) => this.surfaceManager.pushToSurface(name, channel, data),
+      },
+      service: {
+        registry: this.serviceRegistry,
+        promptSecret: async (key: string, prompt: string) => {
+          const value = await vscode.window.showInputBox({
+            prompt,
+            password: true,
+            ignoreFocusOut: true,
+            placeHolder: key,
+          });
+          return value;
+        },
+      },
     });
   }
 
@@ -1515,7 +1598,10 @@ export class Orchestrator {
             : this.manager.get(agentId)?.host;
         const policy = host?.getPermissionPolicy();
         if (msg.allowed && policy) {
-          (policy as any).addToAllowList?.(msg.eventId);
+          const toolName = this.bridge.getPermissionToolName(agentId, msg.eventId);
+          if (msg.remember && toolName) {
+            (policy as any).addToAllowList?.(toolName);
+          }
           this.bridge.post({
             type: 'permission_resolved',
             agentId,
@@ -1767,11 +1853,17 @@ export class Orchestrator {
         break;
       }
 
-      case 'focus_agent':
-        this.bridge.setFocus(msg.agentId);
-        this.bridge.sendSync(msg.agentId);
-        this.panelRevealer?.(msg.agentId);
+      case 'focus_agent': {
+        const sourcePanel = (msg as any).sourcePanelId as string | undefined;
+        if (sourcePanel) {
+          this.bridge.sendSyncToTarget(msg.agentId, sourcePanel);
+        } else {
+          this.bridge.setFocus(msg.agentId);
+          this.bridge.sendSync(msg.agentId);
+          this.panelRevealer?.(msg.agentId);
+        }
         break;
+      }
 
       case 'cancel_agent':
         await this.manager.cancel(msg.agentId, 'Cancelled from UI');
@@ -1995,7 +2087,8 @@ export class Orchestrator {
     const MAX_COOLDOWN_MS = 300_000;
     const VERIFY_WINDOW_MS = 15_000;
 
-    const sig = error.message.slice(0, 100);
+    const sig = `${error.message.slice(0, 100)}:${error.lineno ?? ''}`;
+    const category = classifyError(error.message, error.stack);
 
     // Check for active verification — did a previous fix fail?
     const verification = this.pendingVerifications.get(error.name);
@@ -2033,6 +2126,18 @@ export class Orchestrator {
       return;
     }
 
+    // Network errors: don't rewrite the surface, just notify
+    if (category === 'network-error') {
+      logger.info(`[surfaces] Network error on "${error.name}" — skipping auto-fix (not a code issue)`);
+      this.bridge.appendEvent(FOREGROUND_AGENT_ID, {
+        id: `system-surface-neterr-${Date.now()}`,
+        role: 'system',
+        content: `Surface "${error.name}" has a network error: ${error.message}. Check that the routes server is running and the endpoint exists.`,
+        timestamp: now(),
+      });
+      return;
+    }
+
     const cooldown = Math.min(BASE_COOLDOWN_MS * Math.pow(2, state.attempts), MAX_COOLDOWN_MS);
     if (Date.now() - state.lastAttempt < cooldown) {
       logger.info(`[surfaces] Skipping auto-fix for "${error.name}" — cooldown ${Math.round(cooldown / 1000)}s active (attempt ${state.attempts + 1})`);
@@ -2061,12 +2166,9 @@ export class Orchestrator {
       error.lineno ? `Line: ${error.lineno}, Col: ${error.colno ?? '?'}` : '',
     ].filter(Boolean).join('\n');
 
-    const prompt = surfaceAutoFixPrompt(error.name, errorDetail, source, error.consoleLogs, state.attempts);
+    const prompt = surfaceAutoFixPrompt(error.name, errorDetail, source, error.consoleLogs, state.attempts, category);
 
-    const host = this.manager.getForeground();
-    if (!host) return;
-
-    logger.info(`[surfaces] Auto-fixing "${error.name}" (attempt ${state.attempts}/${MAX_ATTEMPTS}): ${error.message}`);
+    logger.info(`[surfaces] Auto-fixing "${error.name}" [${category}] (attempt ${state.attempts}/${MAX_ATTEMPTS}): ${error.message}`);
 
     this.bridge.appendEvent(FOREGROUND_AGENT_ID, {
       id: `system-surface-fix-${Date.now()}`,
@@ -2075,16 +2177,39 @@ export class Orchestrator {
       timestamp: now(),
     });
 
-    void host.submit(prompt);
+    // Spawn background agent instead of interrupting foreground
+    void this.manager.spawn({
+      task: prompt,
+      label: `fix-surface-${error.name}`,
+      systemPrompt: 'You are a surface auto-repair agent. Fix the error and call surface/update with the corrected HTML. Do not change anything besides the bug.',
+    });
 
-    // Start verification timer — if no recurrence, the fix succeeded
+    // Listen for health-check confirmation from the surface
+    const healthHandler = (surfaceName: string, channel: string, _data: unknown) => {
+      if (surfaceName === error.name && channel === '__health-ok') {
+        clearTimeout(timer);
+        this.pendingVerifications.delete(error.name);
+        this.surfaceFixState.delete(error.name);
+        if (this.surfaceHealthListener === healthHandler) this.surfaceHealthListener = undefined;
+        logger.info(`[surfaces] Auto-fix for "${error.name}" confirmed via health-check`);
+      }
+    };
+    this.surfaceHealthListener = healthHandler;
+
+    // Fallback verification timer
     const timer = setTimeout(() => {
       this.pendingVerifications.delete(error.name);
       this.surfaceFixState.delete(error.name);
-      logger.info(`[surfaces] Auto-fix for "${error.name}" appears successful`);
+      if (this.surfaceHealthListener === healthHandler) this.surfaceHealthListener = undefined;
+      logger.info(`[surfaces] Auto-fix for "${error.name}" appears successful (timeout)`);
     }, VERIFY_WINDOW_MS);
 
     this.pendingVerifications.set(error.name, { errorSignature: sig, timer });
+
+    // Push health-check probe after a short delay to let the fix apply
+    setTimeout(() => {
+      this.surfaceManager.pushToSurface(error.name, '__health-check', { check: true });
+    }, 3000);
   }
 
   private async handleRouteAction(action: ObjectActionKind, urlPath: string): Promise<void> {

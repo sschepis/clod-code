@@ -24,6 +24,7 @@ import {
   createAgentBatchHandler, createAgentCollectHandler,
   createSurfaceListHandler, createSurfaceCreateHandler, createSurfaceUpdateHandler,
   createSurfaceDeleteHandler, createSurfaceOpenHandler, createSurfaceScreenshotHandler,
+  createSurfacePushHandler, createSurfaceBroadcastHandler,
   createRouteListHandler, createRouteInfoHandler, createRouteCreateHandler,
   createRouteUpdateHandler, createRouteDeleteHandler,
   createVscodeRunHandler, createVscodeListHandler,
@@ -97,6 +98,13 @@ import {
   createWebCloseHandler,
   type WebBrowseDeps,
 } from '../tools';
+import {
+  createDataGetHandler, createDataPutHandler, createDataDeleteHandler,
+  createDataListHandler, createDataAddHandler,
+  type DataToolDeps,
+} from '../tools/data-ops';
+import { createCodeRunHandler, type CodeRunDeps } from '../tools/code-run';
+import { createServiceListHandler, createServiceConfigureHandler, type ServiceToolDeps } from '../tools/service-ops';
 
 export interface ToolTreeResult {
   router: Router;
@@ -139,6 +147,12 @@ export interface ToolTreeDeps {
   onFileChanged?: (filePath: string) => void;
   /** Web browsing — headless Chrome session for search, fetch, and interactive browsing. */
   web?: WebBrowseDeps;
+  /** Gun.js data layer — persistent, real-time synced data store. */
+  data?: DataToolDeps;
+  /** Code execution — run Python, JavaScript, or Bash code locally. */
+  codeRun?: CodeRunDeps;
+  /** External service discovery and configuration. */
+  service?: ServiceToolDeps;
 }
 
 /**
@@ -179,6 +193,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             '(4) Line-range delete with start_line + end_line (1-based, inclusive) — deletes lines without needing to match text.',
             'Handles Unicode confusables (box-drawing, smart quotes, special dashes) transparently.',
             'If exact match fails, suggests similar lines with whitespace differences and hex diagnostics.',
+            'For code files, validates that replacements preserve delimiter balance ({}, (), []) to prevent structural corruption.',
           ].join(' '),
           requiredArgs: {
             path: { type: 'string', description: 'File path' },
@@ -187,6 +202,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             old_string: { type: 'string', description: 'Exact string to find and replace (mode 1)' },
             new_string: { type: 'string', description: 'Replacement string (modes 1 & 3)' },
             replace_all: { type: 'boolean', description: 'Replace all occurrences of old_string', default: false },
+            force: { type: 'boolean', description: 'Bypass delimiter balance checks. Only use when intentionally changing brace/paren/bracket balance.', default: false },
             edits: { type: 'json', description: 'Array of {old_string, new_string} pairs for batch editing (mode 2). All validated before any are applied.' },
             after_line: { type: 'number', description: 'Insert new_string after this line number (1-based). Use 0 to insert at file start. (mode 3)' },
             before_line: { type: 'number', description: 'Insert new_string before this line number (1-based). (mode 3)' },
@@ -605,9 +621,46 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         .leaf('state', {
           description: 'Get the state of all open VS Code terminals.',
           handler: createTerminalUiStateHandler(),
+        })
+        .leaf('exec', {
+          description: [
+            'Execute Python, JavaScript, or Bash code locally.',
+            'Auto-detects language if not specified. Returns stdout, stderr, exit code, and execution time.',
+            'Can optionally stream output to an open surface for real-time display.',
+          ].join(' '),
+          requiredArgs: {
+            code: { type: 'string', description: 'Source code to execute' },
+          },
+          optionalArgs: {
+            language: { type: 'string', description: 'Language: python, javascript, bash (auto-detected if omitted)' },
+            timeout: { type: 'number', description: 'Timeout in ms (default 30000)' },
+            surface: { type: 'string', description: 'Surface name to stream output to (optional)' },
+            channel: { type: 'string', description: 'Channel name for surface output (default "code-output")' },
+          },
+          handler: createCodeRunHandler(deps.codeRun ?? {}),
         });
-    })
+    });
 
+    // ── Service discovery ──────────────────────────────────────────
+    if (deps.service) {
+      const svcDeps = deps.service;
+      builder.branch('service', 'Discover and configure external API services (GitHub, Slack, OpenAI, etc.). Use service/list to see what is available and whether credentials are set. Use service/configure to interactively set up missing API keys.', (svc) => {
+        svc
+          .leaf('list', {
+            description: 'List all registered external services and their credential status.',
+            handler: createServiceListHandler(svcDeps),
+          })
+          .leaf('configure', {
+            description: 'Interactively configure an external service by prompting for missing API keys.',
+            requiredArgs: {
+              id: { type: 'string', description: 'Service ID (e.g. "github", "openai"). Use service/list to see available IDs.' },
+            },
+            handler: createServiceConfigureHandler(svcDeps),
+          });
+      });
+    }
+
+    builder
     // ── Git operations ────────────────────────────────────────────
     .branch('git', 'Git version control: status, diff, log, commit, branch, stash. Check git/status before committing to see what is staged. Use git/diff to review changes before committing. Use git/log to understand recent history.', (git) => {
       git
@@ -677,7 +730,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         },
         handler: deps.planPropose
           ? createPlanProposeHandler(deps.planPropose, deps.agent)
-          : createPlanProposeHandler(deps.planPropose!, deps.agent),
+          : async () => '[ERROR] Plan proposal is not available in this context.',
       });
     })
 
@@ -979,6 +1032,16 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       '  This is injected automatically and points to the local route server (e.g. http://localhost:PORT).',
       '  Example: fetch(`${window.__OBOTOVS_ROUTES_URL__}/api/data`).then(r => r.json())',
       '',
+      'REAL-TIME CHANNEL API (window.__obotovs):',
+      '- Every surface gets a `window.__obotovs` object injected automatically.',
+      '- __obotovs.on(channel, handler)  — Subscribe to messages pushed by the agent or other surfaces.',
+      '- __obotovs.off(channel, handler) — Unsubscribe from a channel.',
+      '- __obotovs.emit(channel, data)   — Send a message to the extension (routed to the agent).',
+      '- __obotovs.executeTool(tool, kwargs) — Execute a tool and get a Promise with the result.',
+      '- __obotovs.submitToAgent(text)   — Submit text to the agent (like typing in the chat).',
+      '- Use surface/push to push data from the agent to a specific surface.',
+      '- Use surface/broadcast to push data to all open surfaces.',
+      '',
       'AUTO-REFRESH BEHAVIOR:',
       '- When you call surface/create, the panel opens automatically (if surfacesAutoOpen is enabled).',
       '- When you call surface/update, any open panel showing that surface is refreshed in-place immediately.',
@@ -1035,6 +1098,31 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           requiredArgs: { name: { type: 'string', description: 'Surface name to screenshot (must be open)' } },
           optionalArgs: { label: { type: 'string', description: 'Optional label for the screenshot file (defaults to surface-name-timestamp)' } },
           handler: createSurfaceScreenshotHandler(deps.surface),
+        })
+        .leaf('push', {
+          description: [
+            'Push real-time data to an open surface on a named channel.',
+            'The surface must be open and can listen via window.__obotovs.on(channel, handler).',
+            'Use this for streaming results, live progress updates, or any event-driven data push.',
+          ].join(' '),
+          requiredArgs: {
+            name: { type: 'string', description: 'Surface name to push to (must be open)' },
+            channel: { type: 'string', description: 'Channel name (e.g. "data-update", "progress", "results")' },
+          },
+          optionalArgs: {
+            data: { type: 'json', description: 'Data payload to send (object, array, string, number, etc.)' },
+          },
+          handler: createSurfacePushHandler(deps.surface),
+        })
+        .leaf('broadcast', {
+          description: 'Broadcast a message to ALL open surfaces on a named channel. Useful for global state changes or notifications.',
+          requiredArgs: {
+            channel: { type: 'string', description: 'Channel name' },
+          },
+          optionalArgs: {
+            data: { type: 'json', description: 'Data payload to broadcast' },
+          },
+          handler: createSurfaceBroadcastHandler(deps.surface),
         });
     })
 
@@ -1050,9 +1138,17 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       '- Export named functions for each HTTP method: GET, POST, PUT, DELETE, PATCH.',
       '- Handler signature: async function METHOD(request, context) → Response | object',
       '  • request: { method, url, headers, body (parsed JSON or text), query (URLSearchParams object) }',
-      '  • context: { params } — an object of dynamic segment values (e.g. { id: "42" })',
+      '  • context: { params, store } — params are dynamic segment values; store is a shared Map across all routes',
       '  • Return a Response object, or return a plain object/string (auto-wrapped as JSON 200).',
       '  • To set status/headers: return new Response(JSON.stringify(data), { status: 201, headers: { ... } })',
+      '',
+      'WEBSOCKET SUPPORT:',
+      '- Export a WEBSOCKET(ws, req, context) function for WebSocket connections.',
+      '- Surfaces connect via: new WebSocket(`ws://127.0.0.1:PORT/api/my-route`)',
+      '- ws.send(data), ws.on("message", handler), ws.on("close", handler), ws.close()',
+      '- Example: export function WEBSOCKET(ws, req, { params, store }) {',
+      '    ws.on("message", (msg) => ws.send(JSON.stringify({ echo: msg })));',
+      '  }',
       '',
       'DYNAMIC SEGMENTS:',
       '- Use [brackets] in the path for dynamic parameters: "users/[id]" → params.id',
@@ -1114,6 +1210,56 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         });
     })
 
+    // ── Data (Gun.js-backed persistent data store) ────────────────
+    if (deps.data) {
+      builder.branch('data', [
+        'Read, write, and query persistent data stored in a Gun.js graph database.',
+        '',
+        'Data is stored locally in .obotovs/gun-data/ and syncs in real-time across',
+        'all connected VS Code instances (local windows and remote peers via relays).',
+        '',
+        'PATHS: Use slash-separated paths to address nodes in the graph.',
+        '  Example: "users/alice", "settings/theme", "tasks"',
+        '',
+        'COLLECTIONS: Use data/add to append to a collection (auto-generates an ID).',
+        'Use data/list to enumerate children at a path.',
+      ].join('\n'), (d) => {
+        d
+          .leaf('get', {
+            description: 'Read data at a path. Returns the stored value as JSON.',
+            requiredArgs: { path: { type: 'string', description: 'Slash-separated path (e.g. "users/alice")' } },
+            handler: createDataGetHandler(deps.data!),
+          })
+          .leaf('put', {
+            description: 'Write data at a path. Merges with existing data at that node.',
+            requiredArgs: {
+              path: { type: 'string', description: 'Slash-separated path' },
+              data: { type: 'json', description: 'Data to store (object with key-value pairs)' },
+            },
+            handler: createDataPutHandler(deps.data!),
+          })
+          .leaf('delete', {
+            description: 'Delete data at a path (sets to null).',
+            requiredArgs: { path: { type: 'string', description: 'Path to delete' } },
+            handler: createDataDeleteHandler(deps.data!),
+          })
+          .leaf('list', {
+            description: 'List all children at a path. Returns key-value pairs.',
+            requiredArgs: { path: { type: 'string', description: 'Parent path to list children of' } },
+            handler: createDataListHandler(deps.data!),
+          })
+          .leaf('add', {
+            description: 'Add an item to a collection (auto-generates a unique ID). Use for append-style writes.',
+            requiredArgs: {
+              collection: { type: 'string', description: 'Collection path (e.g. "tasks", "notes")' },
+              data: { type: 'json', description: 'Data to add to the collection' },
+            },
+            handler: createDataAddHandler(deps.data!),
+          });
+      });
+    }
+
+    builder
     // ── Refactor (aegis-pipe: structured code transformations) ─────
     .branch('refactor', [
       'Structured code transformation pipeline powered by aegis-pipe.',

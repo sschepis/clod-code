@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { postMessage, onMessage } from '../vscode-api';
+import { postMessage, onMessage, getVsCodeApi } from '../vscode-api';
 import type {
   ExtToWebviewMessage, Attachment, RoutingMode,
   ObjectCategory, ObjectActionKind,
@@ -16,6 +16,9 @@ import type {
 export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
   useEffect(() => {
     const panelAgentId = (window as any).__OBOTOVS_PANEL_AGENT_ID__ as string | undefined;
+    if (panelAgentId) {
+      getVsCodeApi().setState({ panelId: panelAgentId, label: panelAgentId });
+    }
     postMessage({ type: 'ready', panelAgentId });
     return onMessage(onExtMessage);
   }, [onExtMessage]);

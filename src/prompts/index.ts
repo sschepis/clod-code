@@ -9,7 +9,7 @@ export {
   INTER_AGENT_SLICE_NOT_FOUND,
   INTER_AGENT_NO_TEXT_RESPONSE,
 } from './agents';
-export { surfaceAutoFixPrompt, surfaceCrashedNotice } from './surfaces';
+export { surfaceAutoFixPrompt, surfaceCrashedNotice, classifyError } from './surfaces';
 export {
   NO_SKILLS_GUIDE,
   skillLoadedMessage,

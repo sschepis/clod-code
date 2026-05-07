@@ -116,6 +116,92 @@ function findLineOf(haystack: string, needle: string): number {
   return haystack.slice(0, idx).split('\n').length;
 }
 
+const CODE_EXTENSIONS = new Set([
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.java', '.kt', '.scala', '.groovy',
+  '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp',
+  '.cs', '.go', '.rs', '.swift', '.dart',
+  '.py', '.rb', '.php', '.lua', '.r',
+  '.json', '.jsonc', '.yaml', '.yml', '.toml',
+  '.css', '.scss', '.less', '.sass',
+  '.html', '.vue', '.svelte',
+  '.sh', '.bash', '.zsh', '.fish',
+  '.sql', '.graphql', '.gql',
+]);
+
+function isCodeFile(filePath: string): boolean {
+  const dot = filePath.lastIndexOf('.');
+  if (dot === -1) return false;
+  return CODE_EXTENSIONS.has(filePath.slice(dot).toLowerCase());
+}
+
+/**
+ * Count net delimiter balance in code, skipping string literals and comments.
+ * Positive = excess openers, negative = excess closers.
+ */
+function countCodeDelimiters(s: string): { braces: number; parens: number; brackets: number } {
+  let braces = 0, parens = 0, brackets = 0;
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    const next = i + 1 < s.length ? s[i + 1] : '';
+    if (ch === '/' && next === '/') {
+      while (i < s.length && s[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < s.length - 1 && !(s[i] === '*' && s[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      i++;
+      while (i < s.length) {
+        if (s[i] === '\\') { i += 2; continue; }
+        if (s[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    switch (ch) {
+      case '{': braces++; break;
+      case '}': braces--; break;
+      case '(': parens++; break;
+      case ')': parens--; break;
+      case '[': brackets++; break;
+      case ']': brackets--; break;
+    }
+    i++;
+  }
+  return { braces, parens, brackets };
+}
+
+function formatBalance(n: number): string {
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+function checkWholeFileBalance(
+  original: string,
+  updated: string,
+): string {
+  const origBal = countCodeDelimiters(original);
+  const newBal = countCodeDelimiters(updated);
+  const warnings: string[] = [];
+  if (origBal.braces === 0 && newBal.braces !== 0) {
+    warnings.push(`braces {}: file now has ${formatBalance(newBal.braces)} net balance`);
+  }
+  if (origBal.parens === 0 && newBal.parens !== 0) {
+    warnings.push(`parens (): file now has ${formatBalance(newBal.parens)} net balance`);
+  }
+  if (origBal.brackets === 0 && newBal.brackets !== 0) {
+    warnings.push(`brackets []: file now has ${formatBalance(newBal.brackets)} net balance`);
+  }
+  if (warnings.length === 0) return '';
+  return `\n[WARNING] File delimiter balance changed:\n  ${warnings.join('\n  ')}\n  The file may have syntax errors. Review the edit carefully.`;
+}
+
 /**
  * Build a contextual diff showing surrounding lines with line numbers.
  */
@@ -212,6 +298,8 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
       }
 
       const replaceAll = kwargs.replace_all === true;
+      const force = kwargs.force === true;
+      const codeFile = isCodeFile(filePath);
 
       // ── Build list of edit operations ──────────────────────────
       const ops: EditOp[] = [];
@@ -243,9 +331,11 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
             : beforeInsert + '\n' + insertText + '\n' + afterInsert;
 
           await applyContent(uri, content, updated);
+          onFileChanged?.(filePath);
 
           const insertedCount = insertText.split('\n').length;
-          return `[SUCCESS] Inserted ${insertedCount} line(s) after line ${targetLine} in ${filePath}`;
+          const balWarn = codeFile ? checkWholeFileBalance(content, updated) : '';
+          return `[SUCCESS] Inserted ${insertedCount} line(s) after line ${targetLine} in ${filePath}${balWarn}`;
         } else {
           targetLine = Number(kwargs.before_line);
           if (targetLine < 1 || targetLine > lines.length + 1) {
@@ -258,9 +348,11 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
             : beforeInsert + '\n' + insertText + '\n' + afterInsert;
 
           await applyContent(uri, content, updated);
+          onFileChanged?.(filePath);
 
           const insertedCount = insertText.split('\n').length;
-          return `[SUCCESS] Inserted ${insertedCount} line(s) before line ${targetLine} in ${filePath}`;
+          const balWarn = codeFile ? checkWholeFileBalance(content, updated) : '';
+          return `[SUCCESS] Inserted ${insertedCount} line(s) before line ${targetLine} in ${filePath}${balWarn}`;
         }
       } else if (kwargs.start_line !== undefined && kwargs.end_line !== undefined) {
         // Line-range delete mode
@@ -280,7 +372,8 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
 
         const preview = deleted.slice(0, 5).map(l => `-${l}`).join('\n');
         const more = deleted.length > 5 ? `\n  ... and ${deleted.length - 5} more lines` : '';
-        return `[SUCCESS] Deleted lines ${startLine}-${endLine} (${deleted.length} line(s)) from ${filePath}\n${preview}${more}`;
+        const balWarn = codeFile ? checkWholeFileBalance(content, updated) : '';
+        return `[SUCCESS] Deleted lines ${startLine}-${endLine} (${deleted.length} line(s)) from ${filePath}\n${preview}${more}${balWarn}`;
       } else {
         // Standard single-edit mode
         const oldString = String(kwargs.old_string ?? '');
@@ -331,6 +424,25 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
             return `[ERROR] ${ops.length > 1 ? `Edit ${i + 1}: ` : ''}old_string appears ${count} times in ${filePath} (first at line ${line}). Use replace_all=true or provide more surrounding context to make it unique.`;
           }
         }
+
+        if (codeFile && !force) {
+          const oldBal = countCodeDelimiters(op.old_string);
+          const newBal = countCodeDelimiters(op.new_string);
+          const mismatches: string[] = [];
+          if (oldBal.braces !== newBal.braces) {
+            mismatches.push(`braces {}: old_string has ${formatBalance(oldBal.braces)}, new_string has ${formatBalance(newBal.braces)}`);
+          }
+          if (oldBal.parens !== newBal.parens) {
+            mismatches.push(`parens (): old_string has ${formatBalance(oldBal.parens)}, new_string has ${formatBalance(newBal.parens)}`);
+          }
+          if (oldBal.brackets !== newBal.brackets) {
+            mismatches.push(`brackets []: old_string has ${formatBalance(oldBal.brackets)}, new_string has ${formatBalance(newBal.brackets)}`);
+          }
+          if (mismatches.length > 0) {
+            const prefix = ops.length > 1 ? `Edit ${i + 1}/${ops.length}: ` : '';
+            return `[ERROR] ${prefix}Edit would change delimiter balance in ${filePath}:\n  ${mismatches.join('\n  ')}\nThis usually means the replacement is missing closing delimiters or has extra openers. Verify the replacement includes all necessary braces/parens/brackets, or use force=true to bypass this check.`;
+          }
+        }
       }
 
       // ── Apply all edits sequentially to the content ───────────
@@ -352,7 +464,8 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
       onFileChanged?.(filePath);
 
       const editCount = ops.length === 1 ? '' : ` (${ops.length} edits)`;
-      return `[SUCCESS] Edited ${filePath}${editCount}\n${diffs.join('\n\n')}`;
+      const balanceWarning = codeFile ? checkWholeFileBalance(content, updated) : '';
+      return `[SUCCESS] Edited ${filePath}${editCount}\n${diffs.join('\n\n')}${balanceWarning}`;
     } catch (err) {
       return `[ERROR] Failed to edit file '${filePath}': ${err instanceof Error ? err.message : String(err)}`;
     }

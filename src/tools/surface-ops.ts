@@ -113,6 +113,31 @@ export function createSurfaceScreenshotHandler(deps: SurfaceToolDeps) {
   };
 }
 
+export function createSurfacePushHandler(deps: SurfaceToolDeps) {
+  return async (kwargs: Record<string, unknown>): Promise<string> => {
+    const name = String(kwargs.name || '').trim();
+    const channel = String(kwargs.channel || '').trim();
+    if (!name) return '[ERROR] Missing required argument: name';
+    if (!channel) return '[ERROR] Missing required argument: channel';
+
+    const data = kwargs.data !== undefined ? kwargs.data : null;
+    const sent = deps.manager.pushToSurface(name, channel, data);
+    if (!sent) return `[ERROR] Surface "${name}" is not open. Open it first with surface/open.`;
+    return `[SUCCESS] Pushed message to surface "${name}" on channel "${channel}".`;
+  };
+}
+
+export function createSurfaceBroadcastHandler(deps: SurfaceToolDeps) {
+  return async (kwargs: Record<string, unknown>): Promise<string> => {
+    const channel = String(kwargs.channel || '').trim();
+    if (!channel) return '[ERROR] Missing required argument: channel';
+
+    const data = kwargs.data !== undefined ? kwargs.data : null;
+    deps.manager.broadcastToSurfaces(channel, data);
+    return `[SUCCESS] Broadcast message on channel "${channel}" to all open surfaces.`;
+  };
+}
+
 // Convenience aggregator for the tool-tree file.
 export function createSurfaceHandlers(deps: SurfaceToolDeps) {
   return {
@@ -122,5 +147,7 @@ export function createSurfaceHandlers(deps: SurfaceToolDeps) {
     delete: createSurfaceDeleteHandler(deps),
     open: createSurfaceOpenHandler(deps),
     screenshot: createSurfaceScreenshotHandler(deps),
+    push: createSurfacePushHandler(deps),
+    broadcast: createSurfaceBroadcastHandler(deps),
   };
 }

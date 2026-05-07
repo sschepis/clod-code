@@ -38,6 +38,8 @@ export {
   createSurfaceDeleteHandler,
   createSurfaceOpenHandler,
   createSurfaceScreenshotHandler,
+  createSurfacePushHandler,
+  createSurfaceBroadcastHandler,
 } from './surface-ops';
 export type { SurfaceToolDeps } from './surface-ops';
 export {
@@ -148,3 +150,16 @@ export {
   BrowserSession,
 } from './web-browse';
 export type { WebBrowseDeps } from './web-browse';
+export {
+  createDataGetHandler, createDataPutHandler, createDataDeleteHandler,
+  createDataListHandler, createDataAddHandler, createDataHandlers,
+} from './data-ops';
+export type { DataToolDeps } from './data-ops';
+export { createCodeRunHandler } from './code-run';
+export type { CodeRunDeps } from './code-run';
+export {
+  createServiceListHandler,
+  createServiceConfigureHandler,
+  createServiceHandlers,
+} from './service-ops';
+export type { ServiceToolDeps } from './service-ops';

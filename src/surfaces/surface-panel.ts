@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { stateGet, stateSet, stateDelete, stateKeys } from './surface-state';
 
 function getNonce(): string {
   let text = '';
@@ -36,8 +37,14 @@ export interface SurfacePanelOptions {
   onSubmitToAgent?: (text: string, agentId?: string) => void;
   /** Called when the surface requests to execute a tool. */
   onExecuteTool?: (tool: string, kwargs: Record<string, unknown>) => Promise<any>;
+  /** Called when the surface requests LLM generation/streaming. */
+  onLlmStream?: (prompt: string, modelType: 'local' | 'remote', onChunk: (chunk: string) => void) => Promise<string>;
   /** Called when this surface's webview becomes the active panel. */
   onDidBecomeActive?: () => void;
+  /** Called when the surface emits a channel message. */
+  onChannelMessage?: (surfaceName: string, channel: string, data: unknown) => void;
+  /** Called when the surface wants to open another surface panel. */
+  onOpenSurface?: (name: string) => void;
 }
 
 /**
@@ -119,6 +126,52 @@ export class SurfacePanel {
           });
         }
       }
+      // API: Channel Message (bidirectional communication)
+      if (m.type === 'obotovs:channel-message' && opts.onChannelMessage) {
+        opts.onChannelMessage(this.opts.name, String(m.channel || ''), m.data);
+      }
+
+      // API: State persistence
+      if (m.type === 'obotovs:state-get') {
+        const val = stateGet(opts.workspaceRoot, this.opts.name, String(m.key));
+        this.panel.webview.postMessage({ type: 'obotovs:state-result', id: m.id, value: val });
+      }
+      if (m.type === 'obotovs:state-set') {
+        stateSet(opts.workspaceRoot, this.opts.name, String(m.key), m.value);
+        this.panel.webview.postMessage({ type: 'obotovs:state-result', id: m.id, value: true });
+      }
+      if (m.type === 'obotovs:state-delete') {
+        const ok = stateDelete(opts.workspaceRoot, this.opts.name, String(m.key));
+        this.panel.webview.postMessage({ type: 'obotovs:state-result', id: m.id, value: ok });
+      }
+      if (m.type === 'obotovs:state-keys') {
+        const keys = stateKeys(opts.workspaceRoot, this.opts.name);
+        this.panel.webview.postMessage({ type: 'obotovs:state-result', id: m.id, value: keys });
+      }
+
+      // API: Surface composition
+      if (m.type === 'obotovs:open-surface' && opts.onOpenSurface) {
+        opts.onOpenSurface(String(m.name || ''));
+      }
+      if (m.type === 'obotovs:navigate' && opts.onOpenSurface) {
+        opts.onOpenSurface(String(m.target || ''));
+      }
+      if (m.type === 'obotovs:navigate-back' && opts.onOpenSurface) {
+        opts.onOpenSurface('__back__');
+      }
+
+      // API: LLM Stream
+      if (m.type === 'obotovs:llm-stream' && opts.onLlmStream) {
+        try {
+          const result = await opts.onLlmStream(String(m.prompt), m.modelType as any, (chunk) => {
+             this.panel.webview.postMessage({ type: 'obotovs:llm-stream-chunk', id: m.id, chunk });
+          });
+          this.panel.webview.postMessage({ type: 'obotovs:llm-stream-end', id: m.id, result });
+        } catch (err: any) {
+          this.panel.webview.postMessage({ type: 'obotovs:llm-stream-error', id: m.id, error: err.message });
+        }
+      }
+
     });
 
     this.render();
@@ -126,6 +179,12 @@ export class SurfacePanel {
 
   get name(): string { return this.opts.name; }
   get filePath(): string { return this.opts.filePath; }
+
+  /** Push a message to this surface on a named channel. */
+  pushMessage(channel: string, data: unknown): void {
+    if (this.disposed) return;
+    this.panel.webview.postMessage({ type: 'obotovs:push', channel, data });
+  }
 
   setRoutesUrl(url: string | null): void {
     if (this.disposed) return;
@@ -235,6 +294,145 @@ export class SurfacePanel {
       `  window.__OBOTOVS_ROUTES_URL__ = ${routesUrlJson};\n` +
       `  window.__OBOTOVS_SURFACE__ = ${JSON.stringify(this.opts.name)};\n` +
       `  var vsc = acquireVsCodeApi();\n` +
+      // Channel API: bidirectional real-time communication
+      `  (function(){\n` +
+      `    var _listeners = {};\n` +
+      `    window.__obotovs = {\n` +
+      `      surface: ${JSON.stringify(this.opts.name)},\n` +
+      `      routesUrl: ${routesUrlJson},\n` +
+      `      on: function(channel, handler) {\n` +
+      `        if (!_listeners[channel]) _listeners[channel] = [];\n` +
+      `        _listeners[channel].push(handler);\n` +
+      `      },\n` +
+      `      off: function(channel, handler) {\n` +
+      `        var arr = _listeners[channel]; if (!arr) return;\n` +
+      `        _listeners[channel] = arr.filter(function(h) { return h !== handler; });\n` +
+      `      },\n` +
+      `      emit: function(channel, data) {\n` +
+      `        vsc.postMessage({ type: 'obotovs:channel-message', channel: channel, data: data });\n` +
+      `      },\n` +
+      `      executeTool: function(tool, kwargs) {\n` +
+      `        return new Promise(function(resolve, reject) {\n` +
+      `          var id = 'tool-' + Date.now() + '-' + Math.random().toString(36).slice(2);\n` +
+      `          function handler(e) {\n` +
+      `            var d = e && e.data; if (!d) return;\n` +
+      `            if (d.type === 'obotovs:tool-result' && d.id === id) {\n` +
+      `              window.removeEventListener('message', handler);\n` +
+      `              resolve(d.result);\n` +
+      `            } else if (d.type === 'obotovs:tool-error' && d.id === id) {\n` +
+      `              window.removeEventListener('message', handler);\n` +
+      `              reject(new Error(d.error));\n` +
+      `            }\n` +
+      `          }\n` +
+      `          window.addEventListener('message', handler);\n` +
+      `          vsc.postMessage({ type: 'obotovs:execute-tool', id: id, tool: tool, kwargs: kwargs || {} });\n` +
+      `        });\n` +
+      `      },\n` +
+      `      submitToAgent: function(text, agentId) {\n` +
+      `        vsc.postMessage({ type: 'obotovs:submit-to-agent', text: text, agentId: agentId });\n` +
+      `      },\n` +
+      // LLM streaming API
+      `      llmStream: function(prompt, opts) {\n` +
+      `        opts = opts || {};\n` +
+      `        var modelType = opts.modelType || 'remote';\n` +
+      `        var id = 'llm-' + Date.now() + '-' + Math.random().toString(36).slice(2);\n` +
+      `        var onChunk = opts.onChunk || function() {};\n` +
+      `        return new Promise(function(resolve, reject) {\n` +
+      `          function handler(e) {\n` +
+      `            var d = e && e.data; if (!d) return;\n` +
+      `            if (d.id !== id) return;\n` +
+      `            if (d.type === 'obotovs:llm-stream-chunk') onChunk(d.chunk);\n` +
+      `            else if (d.type === 'obotovs:llm-stream-end') {\n` +
+      `              window.removeEventListener('message', handler);\n` +
+      `              resolve(d.result);\n` +
+      `            } else if (d.type === 'obotovs:llm-stream-error') {\n` +
+      `              window.removeEventListener('message', handler);\n` +
+      `              reject(new Error(d.error));\n` +
+      `            }\n` +
+      `          }\n` +
+      `          window.addEventListener('message', handler);\n` +
+      `          vsc.postMessage({ type: 'obotovs:llm-stream', id: id, prompt: prompt, modelType: modelType });\n` +
+      `        });\n` +
+      `      },\n` +
+      // Theme detection
+      `      theme: (function() {\n` +
+      `        var isDark = document.body.getAttribute('data-vscode-theme-kind') !== 'vscode-light';\n` +
+      `        var cbs = [];\n` +
+      `        var style = getComputedStyle(document.documentElement);\n` +
+      `        var obs = new MutationObserver(function() {\n` +
+      `          var newDark = document.body.getAttribute('data-vscode-theme-kind') !== 'vscode-light';\n` +
+      `          if (newDark !== isDark) { isDark = newDark; cbs.forEach(function(fn) { fn(isDark); }); }\n` +
+      `        });\n` +
+      `        try { obs.observe(document.body, { attributes: true, attributeFilter: ['data-vscode-theme-kind'] }); } catch(e) {}\n` +
+      `        return {\n` +
+      `          get isDark() { return isDark; },\n` +
+      `          get isLight() { return !isDark; },\n` +
+      `          cssVar: function(name) { return style.getPropertyValue(name).trim(); },\n` +
+      `          onChange: function(fn) { cbs.push(fn); },\n` +
+      `        };\n` +
+      `      })(),\n` +
+      // State persistence
+      `      state: (function() {\n` +
+      `        var pending = {};\n` +
+      `        window.addEventListener('message', function(e) {\n` +
+      `          var d = e && e.data; if (!d || d.type !== 'obotovs:state-result') return;\n` +
+      `          var p = pending[d.id]; if (p) { delete pending[d.id]; p(d.value); }\n` +
+      `        });\n` +
+      `        function req(type, key, value) {\n` +
+      `          return new Promise(function(resolve) {\n` +
+      `            var id = 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2);\n` +
+      `            pending[id] = resolve;\n` +
+      `            var msg = { type: type, id: id };\n` +
+      `            if (key !== undefined) msg.key = key;\n` +
+      `            if (value !== undefined) msg.value = value;\n` +
+      `            vsc.postMessage(msg);\n` +
+      `          });\n` +
+      `        }\n` +
+      `        return {\n` +
+      `          get: function(key) { return req('obotovs:state-get', key); },\n` +
+      `          set: function(key, val) { return req('obotovs:state-set', key, val); },\n` +
+      `          delete: function(key) { return req('obotovs:state-delete', key); },\n` +
+      `          keys: function() { return req('obotovs:state-keys'); },\n` +
+      `        };\n` +
+      `      })(),\n` +
+      // Surface composition
+      `      openSurface: function(name) {\n` +
+      `        vsc.postMessage({ type: 'obotovs:open-surface', name: name });\n` +
+      `      },\n` +
+      `      navigate: function(surfaceName) {\n` +
+      `        vsc.postMessage({ type: 'obotovs:navigate', target: surfaceName });\n` +
+      `      },\n` +
+      `      back: function() {\n` +
+      `        vsc.postMessage({ type: 'obotovs:navigate-back' });\n` +
+      `      },\n` +
+      // Asset URL helper
+      `      assetUrl: function(assetPath) {\n` +
+      `        var base = window.__OBOTOVS_ROUTES_URL__;\n` +
+      `        if (!base) return null;\n` +
+      `        return base + '/__assets/' + assetPath.replace(/^\\/+/, '');\n` +
+      `      },\n` +
+      // Utility functions
+      `      debounce: function(fn, ms) {\n` +
+      `        var t; return function() { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function() { fn.apply(c, a); }, ms); };\n` +
+      `      },\n` +
+      `      throttle: function(fn, ms) {\n` +
+      `        var last = 0; return function() { var now = Date.now(); if (now - last >= ms) { last = now; fn.apply(this, arguments); } };\n` +
+      `      },\n` +
+      `    };\n` +
+      `    window.addEventListener('message', function(e) {\n` +
+      `      var d = e && e.data; if (!d) return;\n` +
+      `      if (d.type === 'obotovs:push') {\n` +
+      `        var arr = _listeners[d.channel];\n` +
+      `        if (arr) arr.forEach(function(fn) { try { fn(d.data); } catch(e) { console.error(e); } });\n` +
+      `        if (d.channel === '__health-check') {\n` +
+      `          vsc.postMessage({ type: 'obotovs:channel-message', channel: '__health-ok', data: { surface: window.__obotovs.surface } });\n` +
+      `        }\n` +
+      `      }\n` +
+      `      if (d.type === 'obotovs:routes') {\n` +
+      `        window.__obotovs.routesUrl = d.url;\n` +
+      `      }\n` +
+      `    });\n` +
+      `  })();\n` +
       `  window.addEventListener('message', function(e){\n` +
       `    var d = e && e.data; if (!d) return;\n` +
       `    if (d.type === 'obotovs:routes') window.__OBOTOVS_ROUTES_URL__ = d.url;\n` +

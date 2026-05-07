@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ThoughtBlock } from './ThoughtBlock';
@@ -31,9 +31,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   events, phase, isProcessing, onRevert, onEdit, onRerun, onDelete, onPermissionRespond, onQuestionRespond, onSecretRespond, onPeerDispatchRespond, onPlanApprovalRespond,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const threshold = 80;
+    userScrolledUp.current = el.scrollHeight - el.scrollTop - el.clientHeight > threshold;
+  }, []);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && !userScrolledUp.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [events, isProcessing, phase]);
@@ -113,6 +121,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             key={event.id || index}
             id={event.id}
             toolName={event.toolName}
+            toolInput={event.toolInput}
             description={event.description}
             status={event.status}
             onRespond={onPermissionRespond}
@@ -178,6 +187,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   return (
     <div
       ref={scrollRef}
+      onScroll={handleScroll}
       role="log"
       aria-live="polite"
       aria-label="Chat messages"

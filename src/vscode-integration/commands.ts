@@ -107,7 +107,7 @@ export function registerCommands(
   // New session
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.NEW_SESSION, async () => {
-      if (!sidebar) {
+      if (!orchestrator) {
         vscode.window.showWarningMessage('Oboto VS is not initialized. Check the output log.');
         return;
       }
@@ -116,15 +116,15 @@ export function registerCommands(
         'Yes', 'No'
       );
       if (confirm !== 'Yes') return;
-      sidebar.postMessage({ type: 'clear' });
+      await orchestrator.clearSession();
     })
   );
 
   // Clear session
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMANDS.CLEAR_SESSION, () => {
-      if (!sidebar) return;
-      sidebar.postMessage({ type: 'clear' });
+    vscode.commands.registerCommand(COMMANDS.CLEAR_SESSION, async () => {
+      if (!orchestrator) return;
+      await orchestrator.clearSession();
     })
   );
 
@@ -172,8 +172,8 @@ export function registerCommands(
   // Ask about selection
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.ASK_ABOUT_SELECTION, async () => {
-      if (!sidebar) {
-        vscode.window.showWarningMessage('Oboto VS chat panel is not available.');
+      if (!orchestrator) {
+        vscode.window.showWarningMessage('Oboto VS agent is not initialized.');
         return;
       }
 
@@ -193,21 +193,13 @@ export function registerCommands(
 
       if (!question) return;
 
-      sidebar.focus();
+      sidebar?.focus();
 
       const filePath = editor.document.uri.fsPath;
       const lineNum = editor.selection.start.line + 1;
       const text = `${question}\n\nFrom \`${filePath}:${lineNum}\`:\n\`\`\`\n${selection}\n\`\`\``;
 
-      sidebar.postMessage({
-        type: 'event',
-        event: {
-          id: `user-${Date.now()}`,
-          role: 'user',
-          content: text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      });
+      await orchestrator.submitToAgent('foreground', text);
     })
   );
 
@@ -250,6 +242,28 @@ export function registerCommands(
       if (selected) {
         chatPanelManager.getPanel(selected.panelId)?.reveal();
       }
+    })
+  );
+
+  // ── Project commands ─────────────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.PROJECT_INIT, async () => {
+      if (!orchestrator) {
+        vscode.window.showWarningMessage('Oboto VS agent is not initialized.');
+        return;
+      }
+      await orchestrator.submitToAgent('foreground', 'Initialize this project — scan the workspace, detect conventions, and set up project metadata.');
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.PROJECT_STATUS, async () => {
+      if (!orchestrator) {
+        vscode.window.showWarningMessage('Oboto VS agent is not initialized.');
+        return;
+      }
+      await orchestrator.submitToAgent('foreground', 'Show the current project status — active plans, recent activity, and project health.');
     })
   );
 
@@ -405,14 +419,14 @@ export function registerCommands(
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.EXPLORER_FOCUS_TASK, (node: ExplorerNode) => {
-      if (!node.agentId) return;
-      const syncMsg = { type: 'agents_sync' as const, agents: orchestrator?.getAgentSummaries() ?? [], focusedAgentId: node.agentId };
+      if (!node.agentId || !orchestrator) return;
+      const bridge = orchestrator.getBridge();
       const activePanelId = chatPanelManager?.getActivePanelId();
-      const activePanel = activePanelId ? chatPanelManager?.getPanel(activePanelId) : undefined;
-      if (activePanel) {
-        activePanel.postMessage(syncMsg);
-      } else if (sidebar) {
-        sidebar.postMessage(syncMsg);
+      if (activePanelId) {
+        bridge.sendSyncToTarget(node.agentId, activePanelId);
+      } else {
+        bridge.setFocus(node.agentId);
+        bridge.sendSync(node.agentId);
       }
     })
   );

@@ -105,7 +105,7 @@ export function useMessages() {
 
   const isProcessing = useMemo<boolean>(() => {
     const p = focusedSlice.phase.phase;
-    return p !== 'idle' && p !== 'complete' && p !== 'error';
+    return p !== 'idle' && p !== 'complete' && p !== 'error' && p !== 'cancel' && p !== 'doom';
   }, [focusedSlice]);
 
   const aggregateCost = useMemo<CostState>(() => {

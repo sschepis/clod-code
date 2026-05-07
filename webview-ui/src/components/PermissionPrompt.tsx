@@ -4,12 +4,13 @@ import { ShieldAlert, Check, X } from 'lucide-react';
 interface PermissionPromptProps {
   id: string;
   toolName: string;
+  toolInput?: string;
   description: string;
   status: 'pending' | 'allowed' | 'denied';
   onRespond: (eventId: string, allowed: boolean, remember: boolean) => void;
 }
 
-export const PermissionPrompt: React.FC<PermissionPromptProps> = ({ id, toolName, description, status, onRespond }) => {
+export const PermissionPrompt: React.FC<PermissionPromptProps> = ({ id, toolName, toolInput, description, status, onRespond }) => {
   if (status !== 'pending') {
     return (
       <div className="px-6 py-2 ml-4 border-l-2 border-vscode-panelBorder/60 my-1 fade-in">
@@ -42,6 +43,9 @@ export const PermissionPrompt: React.FC<PermissionPromptProps> = ({ id, toolName
         <div id={`perm-desc-${id}`} className="text-sm text-vscode-editorFg">
           <span className="font-mono text-amber-400/80 bg-amber-400/10 px-1.5 py-0.5 rounded">{toolName}</span>
           <p className="mt-1.5 text-vscode-desc">{description}</p>
+          {toolInput && (
+            <pre className="mt-2 text-xs text-vscode-desc bg-vscode-panelBg/60 rounded p-2 overflow-x-auto max-h-32 whitespace-pre-wrap break-all">{toolInput}</pre>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

@@ -111,7 +111,7 @@ export class ChatPanelManager {
     return [...this.panels.entries()].map(([id, p]) => ({
       panelId: id,
       label: p.label,
-      createdAt: 0,
+      createdAt: p.createdAt,
       lastActiveAt: Date.now(),
     }));
   }
@@ -156,7 +156,7 @@ export class ChatPanelManager {
     const metas: PanelMeta[] = [...this.panels.entries()].map(([id, p]) => ({
       panelId: id,
       label: p.label,
-      createdAt: 0,
+      createdAt: p.createdAt,
       lastActiveAt: Date.now(),
     }));
     this.sessionStore.savePanelIndex(metas).catch((err) => {

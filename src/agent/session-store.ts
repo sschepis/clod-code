@@ -43,10 +43,15 @@ export class SessionStore {
     this.workspaceState = opts.workspaceState;
   }
 
+  private pendingSession: Session | undefined;
+  private pendingPanelSessions = new Map<string, Session>();
+
   /** Save the current session (debounced). */
   scheduleSave(session: Session): void {
+    this.pendingSession = session;
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
+      this.pendingSession = undefined;
       this.save(session).catch(err => {
         console.warn('[obotovs] Session save failed:', err);
       });
@@ -166,9 +171,11 @@ export class SessionStore {
   private panelSaveTimers = new Map<string, NodeJS.Timeout>();
 
   scheduleSavePanel(panelId: string, session: Session): void {
+    this.pendingPanelSessions.set(panelId, session);
     const existing = this.panelSaveTimers.get(panelId);
     if (existing) clearTimeout(existing);
     this.panelSaveTimers.set(panelId, setTimeout(() => {
+      this.pendingPanelSessions.delete(panelId);
       this.savePanel(panelId, session).catch(err => {
         console.warn(`[obotovs] Panel session save failed for ${panelId}:`, err);
       });
@@ -229,7 +236,7 @@ export class SessionStore {
   }
 
   async deletePanel(panelId: string): Promise<void> {
-    for (const suffix of ['.json', '.memory.json', '.routing.json']) {
+    for (const suffix of ['.json', '.memory.json', '.routing.json', '.events.json']) {
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(path.join(this.storageDir, `${panelId}${suffix}`)));
       } catch { /* may not exist */ }
@@ -283,6 +290,25 @@ export class SessionStore {
 
   async loadPanelUiEvents(panelId: string): Promise<unknown[] | undefined> {
     return this.tryReadJson(path.join(this.storageDir, `${panelId}.events.json`)) as Promise<unknown[] | undefined>;
+  }
+
+  async flush(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    if (this.pendingSession) {
+      if (this.saveTimer) clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+      const s = this.pendingSession;
+      this.pendingSession = undefined;
+      promises.push(this.save(s).catch(err => console.warn('[obotovs] Flush session save failed:', err)));
+    }
+    for (const [panelId, session] of this.pendingPanelSessions) {
+      const timer = this.panelSaveTimers.get(panelId);
+      if (timer) clearTimeout(timer);
+      this.panelSaveTimers.delete(panelId);
+      promises.push(this.savePanel(panelId, session).catch(err => console.warn(`[obotovs] Flush panel save failed for ${panelId}:`, err)));
+    }
+    this.pendingPanelSessions.clear();
+    await Promise.all(promises);
   }
 
   dispose(): void {

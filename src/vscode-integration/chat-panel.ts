@@ -11,6 +11,7 @@ export class ChatPanel implements WebviewTarget {
 
   readonly panelId: string;
   label: string;
+  readonly createdAt: number = Date.now();
 
   constructor(
     extensionUri: vscode.Uri,
