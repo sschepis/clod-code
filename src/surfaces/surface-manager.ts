@@ -226,6 +226,13 @@ export class SurfaceManager {
     for (const panel of this.panels.values()) panel.setRoutesUrl(url);
   }
 
+  /** Push a mesh event to all open surface panels (surfaces filter by type). */
+  broadcastMeshEvent(event: unknown): void {
+    for (const panel of this.panels.values()) {
+      panel.postMessage({ type: 'obotovs:mesh-event', data: event });
+    }
+  }
+
   dispose(): void {
     this.watcher?.dispose();
     this.watcher = undefined;

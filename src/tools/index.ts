@@ -140,6 +140,13 @@ export {
   createProjectArchiveHandler,
 } from './project-ops';
 export type { ProjectToolDeps } from './project-ops';
+export {
+  createFleetStatusHandler,
+  createFleetEventsHandler,
+  createFleetPodsHandler,
+  createFleetBroadcastHandler,
+} from './fleet-ops';
+export type { FleetToolDeps } from './fleet-ops';
 export { createWebSearchHandler } from './web-search';
 export { createWebFetchHandler } from './web-fetch';
 export {

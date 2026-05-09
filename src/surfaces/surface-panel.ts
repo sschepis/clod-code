@@ -203,6 +203,10 @@ export class SurfacePanel {
     if (!this.disposed) this.panel.reveal(vscode.ViewColumn.Active, false);
   }
 
+  postMessage(message: unknown): void {
+    if (!this.disposed) this.panel.webview.postMessage(message);
+  }
+
   /**
    * Capture the surface's rendered output as a PNG buffer.
    * Sends a message to the webview which uses html2canvas to render the DOM,

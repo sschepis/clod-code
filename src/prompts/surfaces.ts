@@ -52,7 +52,7 @@ export function surfaceAutoFixPrompt(
   prompt +=
     `Here is the full source of the surface:\n\n` +
     `\`\`\`html\n${source}\n\`\`\`\n\n` +
-    `Fix the error by calling the surface/update tool with the corrected HTML. ` +
+    `Fix the error by using the terminal_interface tool to call the 'surface/update' command with the corrected HTML. ` +
     `Only fix the bug — do not change the surface's behavior or appearance otherwise.`;
 
   return prompt;

@@ -30,6 +30,7 @@ import { dynamicImport } from '../shared/dynamic-import';
 import { getErrorMessage } from '../shared/errors';
 import { getProviderMeta } from '../config/provider-registry';
 import { getSpinnerMessage } from './spinner-messages';
+import { AlephMeshSync } from './aleph-mesh-sync';
 
 // ── UI-neutral event types ─────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ export class AgentHost {
   private activeModel: ModelInfo;
   private triageModel: ModelInfo | undefined;
   private disposed = false;
+  private meshSync?: AlephMeshSync;
   private listeners = new Set<HostEventListener>();
   private pendingInput: string | null = null;
 
@@ -331,6 +333,9 @@ export class AgentHost {
       });
 
       this.wireEvents();
+
+      // Setup Aleph P2P Mesh Sync
+      this.meshSync = new AlephMeshSync((this.agent as any).bus);
 
       this.activeModel = { ...this.activeModel, ready: true };
       if (this.triageModel) this.triageModel = { ...this.triageModel, ready: true };
@@ -569,6 +574,10 @@ Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "
   }
 
   private teardownAgent(): void {
+    if (this.meshSync) {
+      this.meshSync.dispose();
+      this.meshSync = undefined;
+    }
     try {
       this.agent?.removeAllListeners?.();
     } catch (err) {

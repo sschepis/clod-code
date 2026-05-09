@@ -47,6 +47,7 @@ import { PeerAskRegistry } from '../peers/peer-ask-registry';
 import { MemoryManager } from './memory/memory-manager';
 import { ServiceRegistry } from '../services/service-registry';
 import { GunRelayServer } from '../peers/gun-relay';
+import { FleetMeshManager } from './fleet-mesh-manager';
 import type { AgentSyncMonitor } from './sync';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -150,6 +151,7 @@ export class Orchestrator {
   private gunRelay: GunRelayServer;
   public readonly toolbarRegistry: ToolbarRegistry;
   private problemReporter?: import('../tools/problem-reporter').ToolProblemReporter;
+  private fleetMesh?: FleetMeshManager;
 
   public get surfaceManagerInstance(): SurfaceManager {
     return this.surfaceManager;
@@ -679,6 +681,20 @@ export class Orchestrator {
       logger.warn('Sync monitor init failed — cross-agent sync will be unavailable', err);
     }
 
+    // Fleet mesh (non-fatal — fleet tools degrade gracefully)
+    if (process.env.MESH_PEERS) {
+      try {
+        this.fleetMesh = new FleetMeshManager();
+        await this.fleetMesh.start();
+        this.fleetMesh.onEvent((event) => {
+          this.surfaceManager.broadcastMeshEvent(event);
+        });
+      } catch (err) {
+        logger.warn('Fleet mesh init failed — fleet tools will be unavailable', err);
+        this.fleetMesh = undefined;
+      }
+    }
+
     await this.createForeground();
     this.setContext('obotovs.agentReady', true);
     this.setContext('obotovs.hasSession', true);
@@ -888,6 +904,7 @@ export class Orchestrator {
     if (this.memoryChangeUnsubscribe) this.memoryChangeUnsubscribe();
     if (this.objectsBroadcastTimer) clearTimeout(this.objectsBroadcastTimer);
     this.objectsWatcher?.dispose();
+    if (this.fleetMesh) void this.fleetMesh.shutdown();
     for (const session of this.browserSessions.values()) session.dispose();
     this.browserSessions.clear();
   }
@@ -1459,6 +1476,7 @@ export class Orchestrator {
           return value;
         },
       },
+      fleet: this.fleetMesh?.getFleetToolDeps(),
     });
   }
 
