@@ -26,6 +26,8 @@ export interface OpenResult {
   reason?: string;
 }
 
+export type VirtualSurfaceProvider = (context?: unknown) => string | Promise<string>;
+
 export interface SurfaceManagerOptions {
   /** Returns whether the AI is currently allowed to auto-open panels. */
   isAutoOpenEnabled: () => boolean;
@@ -47,12 +49,17 @@ export interface SurfaceManagerOptions {
 
 export class SurfaceManager {
   private panels = new Map<string, SurfacePanel>();
+  private virtualSurfaces = new Map<string, VirtualSurfaceProvider>();
   private watcher?: vscode.FileSystemWatcher;
   private activeSurfaceName: string | null = null;
   private navigationStack: string[] = [];
 
   constructor(private readonly opts: SurfaceManagerOptions) {
     this.installWatcher();
+  }
+
+  public registerVirtualSurface(id: string, provider: VirtualSurfaceProvider) {
+    this.virtualSurfaces.set(id, provider);
   }
 
   listSurfaces(): string[] {
@@ -113,10 +120,12 @@ export class SurfaceManager {
     if (!SURFACE_NAME_RE.test(name)) {
       return { ok: false, reason: `Invalid surface name "${name}".` };
     }
+
+    const virtualProvider = this.virtualSurfaces.get(name);
     const root = workspaceRoot();
-    if (!root) return { ok: false, reason: 'No workspace folder is open.' };
-    const file = surfaceFile(root, name);
-    if (!fs.existsSync(file)) return { ok: false, reason: `Surface "${name}" does not exist.` };
+    if (!virtualProvider && !root) return { ok: false, reason: 'No workspace folder is open.' };
+    const file = root ? surfaceFile(root, name) : '';
+    if (!virtualProvider && !fs.existsSync(file)) return { ok: false, reason: `Surface "${name}" does not exist.` };
 
     const existing = this.panels.get(name);
     if (existing) {
@@ -126,8 +135,9 @@ export class SurfaceManager {
 
     const panel = new SurfacePanel({
       name,
-      filePath: file,
-      workspaceRoot: root,
+      filePath: virtualProvider ? undefined : file,
+      virtualHtmlProvider: virtualProvider,
+      workspaceRoot: root || '',
       routesUrl: this.opts.getRoutesUrl(),
       onDispose: () => {
         this.panels.delete(name);

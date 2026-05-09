@@ -13,6 +13,8 @@ import { migrateSettingsIfNeeded, autoDetectProviders } from './config/settings-
 import { AiFileTracker } from './vscode-integration/ai-file-tracker';
 import { ObotoCodeLensProvider, registerCodeLensCommands } from './vscode-integration/codelens-provider';
 import { registerQuickTask } from './vscode-integration/quick-task';
+import { registerLanguageIntegrations } from './vscode-integration/language-integrations';
+import { ToolProblemReporter } from './tools/problem-reporter';
 import { logger } from './shared/logger';
 import { currentWindowId, registerWindow, unregisterWindow } from './shared/window-id';
 import { seedTemplatesIfNeeded } from './skills/seed-templates';
@@ -143,6 +145,11 @@ export async function activate(context: vscode.ExtensionContext) {
       context.subscriptions.push(decorationManager);
       orchestrator.setDecorationManager(decorationManager);
 
+      // Tool problem reporter — logs all tool errors to a dedicated output channel
+      const problemReporter = new ToolProblemReporter();
+      context.subscriptions.push(problemReporter);
+      orchestrator.setProblemReporter(problemReporter);
+
       orchestrator.setFileChangedCallback((filePath) => {
         fileTracker!.add(vscode.Uri.file(filePath));
       });
@@ -235,6 +242,20 @@ export async function activate(context: vscode.ExtensionContext) {
     logger.error('Failed to register quick task', err);
   }
 
+  // 8d. Language integrations (code actions, URI handler, doc links,
+  //     comment controller, terminal links, chat participant, inline completions)
+  if (orchestrator) {
+    try {
+      const { commentController } = registerLanguageIntegrations(context, orchestrator);
+      orchestrator.setReviewCommentCallback((uri, line, text) => {
+        commentController.addReviewComment(uri, line, text);
+      });
+      logger.info('Language integrations registered');
+    } catch (err) {
+      logger.error('Failed to register language integrations', err);
+    }
+  }
+
   // 9. Watch for settings changes (debounced to coalesce multi-field saves)
   try {
     let debounceTimer: NodeJS.Timeout | undefined;
@@ -273,6 +294,12 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   logger.info('Extension activated successfully');
+
+  return {
+    explorerProvider,
+    surfaceManager: orchestrator?.surfaceManagerInstance,
+    toolbarRegistry: orchestrator?.toolbarRegistry,
+  };
 }
 
 export function deactivate() {

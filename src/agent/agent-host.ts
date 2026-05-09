@@ -113,6 +113,8 @@ export class AgentHost {
   private consecutiveSilentRounds = 0;
   private commentaryInFlight = false;
   private lastUserInput = '';
+  private currentIteration = 0;
+  private lastChaperoneIteration = 0;
 
   constructor(config: AgentHostConfig) {
     this.id = config.id;
@@ -287,7 +289,23 @@ export class AgentHost {
       const session = existingSession ?? createEmptySession();
 
       const permMode = this.permissionModeOverride ?? this.settings.permissionMode;
-      this.permissionPolicy = createPermissionPolicy(permMode);
+      const basePolicy = createPermissionPolicy(permMode) as any;
+      this.permissionPolicy = {
+        get allowList() { return basePolicy.allowList; },
+        addToAllowList: (cmd: string) => basePolicy.addToAllowList(cmd),
+        requiredModeFor: (cmd: string) => basePolicy.requiredModeFor(cmd),
+        authorize: async (toolName: string, toolInput: any) => {
+          if (this.currentIteration - this.lastChaperoneIteration >= this.settings.maxIterations) {
+            this.emit({ type: 'phase', phase: 'chaperone', message: 'Chaperone is evaluating progress...' });
+            const chaperoneResult = await this.invokeChaperone();
+            this.lastChaperoneIteration = this.currentIteration;
+            if (chaperoneResult === 'abort') {
+              return { kind: 'deny', reason: 'Chaperone Agent halted execution due to lack of productive progress.' };
+            }
+          }
+          return basePolicy.authorize(toolName, toolInput);
+        }
+      } as any;
 
       this.agent = new ObotoAgent({
         localModel: this._localProvider as any,
@@ -297,7 +315,7 @@ export class AgentHost {
         router: this.router as any,
         session,
         systemPrompt,
-        maxIterations: this.settings.maxIterations,
+        maxIterations: 9999,
         maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
         onToken: (token) => this.emit({ type: 'token', text: token }),
         permissionPolicy: this.permissionPolicy as any,
@@ -333,7 +351,7 @@ export class AgentHost {
     if (!this.agent) return;
     const a = this.agent;
 
-    const SPINNER_PHASES = new Set(['thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory']);
+    const SPINNER_PHASES = new Set(['thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory', 'chaperone']);
     a.on('phase', (e) => {
       const p = e.payload as { phase: string; message: string };
       const message = SPINNER_PHASES.has(p.phase) ? getSpinnerMessage() : p.message;
@@ -382,6 +400,7 @@ export class AgentHost {
     a.on('tool_round_complete', (e) => {
       const p = e.payload as { narrative: string; iteration: number; totalToolCalls: number };
       this.consecutiveSilentRounds++;
+      this.currentIteration = p.iteration;
       this.emit({
         type: 'tool_round',
         narrative: p.narrative,
@@ -450,6 +469,43 @@ export class AgentHost {
       logger.error(`AgentHost "${this.id}": failed to submit queued input`, err);
       this.emit({ type: 'error', message: getErrorMessage(err) });
     });
+  }
+
+  // ── Chaperone engine ─────────────────────────────────────────────────
+
+  private async invokeChaperone(): Promise<'continue' | 'abort'> {
+    if (!this.remoteProvider || !this.remoteModelName) return 'continue';
+    const provider = this.remoteProvider;
+    const model = this.remoteModelName;
+
+    const recentLog = this.toolLog.map(t => `- [${t.success ? 'OK' : 'ERR'}] ${t.command} (${t.target})`).join('\n');
+    const prompt = `The primary agent has been running for ${this.currentIteration} iterations.
+Recent tool calls:
+${recentLog}
+
+Evaluate if the agent is making productive progress or if it is stuck in a non-productive loop/repeating errors.
+Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "..."}`;
+
+    try {
+      const res = await provider.chat({
+        model,
+        messages: [{ role: 'user' as const, content: prompt }],
+        max_tokens: 500
+      });
+      const content = (res?.choices?.[0]?.message?.content as string)?.trim() || '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.status === 'abort') {
+          logger.warn(`AgentHost "${this.id}": Chaperone aborted loop. Reason: ${parsed.reasoning}`);
+          return 'abort';
+        }
+      }
+      return 'continue';
+    } catch (err) {
+      logger.error(`AgentHost "${this.id}": Chaperone failed`, err);
+      return 'continue';
+    }
   }
 
   // ── Commentary engine ─────────────────────────────────────────────────

@@ -48,6 +48,7 @@ interface AgentUiSlice {
   mode: 'act' | 'plan';
   planApprovalMode?: 'auto' | 'manual';
   consecutiveToolRounds: number;
+  turnToolErrors: number;
 }
 
 export type SliceChangeListener = (agentId: string) => void;
@@ -112,6 +113,7 @@ export class WebviewBridge {
         streamingEventId: null,
         mode,
         consecutiveToolRounds: 0,
+        turnToolErrors: 0,
       };
       this.slices.set(agentId, slice);
     }
@@ -412,8 +414,11 @@ export class WebviewBridge {
 
     switch (event.type) {
       case 'phase': {
-        const KNOWN_PHASES = new Set(['idle','request','precheck','planning','thinking','tools','validation','memory','continuation','error','doom','cancel','complete']);
+        const KNOWN_PHASES = new Set(['idle','request','precheck','planning','thinking','tools','validation','memory','continuation','chaperone','error','doom','cancel','complete']);
         const phase = KNOWN_PHASES.has(event.phase) ? event.phase as AgentPhase : 'thinking' as AgentPhase;
+        if (phase === 'request') {
+          slice.turnToolErrors = 0;
+        }
         slice.phase = { phase, message: event.message };
         this.post({ type: 'phase', agentId, phase, message: event.message });
         break;
@@ -506,9 +511,11 @@ export class WebviewBridge {
         for (let i = slice.events.length - 1; i >= 0; i--) {
           const e = slice.events[i];
           if (e.role === 'tool' && e.status === 'running' && e.command === event.command) {
-            const status = event.error ? 'error' : 'success';
+            const isError = !!event.error || (typeof event.result === 'string' && event.result.startsWith('[ERROR]'));
+            const status = isError ? 'error' : 'success';
             const output = event.result || event.error || '';
             const duration = event.durationMs ? `${(event.durationMs / 1000).toFixed(1)}s` : undefined;
+            if (isError) slice.turnToolErrors++;
             slice.events[i] = { ...e, status, output, duration } as SessionEvent;
             this.post({
               type: 'tool_status',
@@ -558,12 +565,22 @@ export class WebviewBridge {
         break;
       }
 
-      case 'turn_complete':
+      case 'turn_complete': {
+        if (slice.turnToolErrors > 0) {
+          const n = slice.turnToolErrors;
+          this.post({
+            type: 'tool_errors_summary',
+            agentId,
+            errorCount: n,
+          });
+          slice.turnToolErrors = 0;
+        }
         slice.phase = { phase: 'idle', message: '' };
         slice.consecutiveToolRounds = 0;
         this.post({ type: 'phase', agentId, phase: 'idle', message: '' });
         this.notifyCriticalSliceChange(agentId);
         break;
+      }
 
       case 'cost':
         slice.cost = { totalTokens: event.totalTokens, totalCost: event.totalCost };

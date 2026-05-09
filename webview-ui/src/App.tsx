@@ -51,6 +51,7 @@ export default function App() {
     setOutboundDispatches,
     setObjects,
     setSyncMetrics,
+    setToolbarButtons,
   } = useMessages();
 
   const focusedAgentId = state.focusedAgentId;
@@ -227,19 +228,30 @@ export default function App() {
         setRecordingError(msg.error);
         setTimeout(() => setRecordingError(null), 5000);
         break;
+      case 'set_toolbar_buttons':
+        setToolbarButtons(msg.buttons);
+        break;
+      case 'tool_errors_summary':
+        addEvent(aid, {
+          id: `tool-errors-${Date.now()}`,
+          role: 'system',
+          content: `__TOOL_ERRORS__:${msg.errorCount}`,
+          timestamp: now(),
+        });
+        break;
     }
   }, [
     appendToken, addEvent, updateToolStatus, updatePermissionStatus,
     updateQuestionStatus, updateSecretStatus, updatePeerDispatchStatus, updatePlanApprovalStatus, sync, syncAgents,
     setPhase, setCost, setModel, setSlashCommands, clearEvents, clearStaleErrors,
-    upsertAgent, patchAgent, removeAgent, setPeers, setOutboundDispatches, setObjects, setSyncMetrics,
+    upsertAgent, patchAgent, removeAgent, setPeers, setOutboundDispatches, setObjects, setSyncMetrics, setToolbarButtons,
   ]);
 
   const {
     submit, interrupt, revert, deleteEvent: deleteEventMsg, editAndResubmit,
     changeModel, changeRoutingMode,
     respondPermission, respondQuestion, respondSecret, respondPeerDispatch, respondPlanApproval,
-    focusAgent, cancelAgent, objectAction,
+    focusAgent, cancelAgent, objectAction, executeToolbarAction,
   } = useVsCode(handleExtMessage);
 
   // ── Handlers ──────────────────────────────────────────────────────
@@ -338,6 +350,16 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-2 shrink-0">
+          {state.toolbarButtons.map(btn => (
+            <button
+              key={btn.id}
+              onClick={() => executeToolbarAction(btn.actionId)}
+              className="p-1.5 rounded hover:bg-vscode-inputBg text-vscode-desc hover:text-vscode-editorFg transition-colors"
+              title={btn.tooltip}
+            >
+              <i className={`codicon codicon-${btn.icon}`} style={{ fontSize: '14px' }} />
+            </button>
+          ))}
           {!isPanelMode && (
             <button
               onClick={() => postMessage({ type: 'new_chat' })}

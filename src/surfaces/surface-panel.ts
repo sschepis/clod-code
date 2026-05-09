@@ -23,8 +23,10 @@ export interface SurfaceError {
 export interface SurfacePanelOptions {
   /** Surface name (without .html extension). */
   name: string;
-  /** Absolute path to the HTML file under `.obotovs/surfaces/`. */
-  filePath: string;
+  /** Absolute path to the HTML file under `.obotovs/surfaces/`. Required unless virtualHtmlProvider is provided. */
+  filePath?: string;
+  /** Function providing virtual HTML content. If provided, filePath is not read. */
+  virtualHtmlProvider?: () => string | Promise<string>;
   /** The workspace root. Used for `localResourceRoots`. */
   workspaceRoot: string;
   /** Current routes server base URL, or null if not started. */
@@ -60,7 +62,7 @@ export class SurfacePanel {
   private lastUserHtml = "";
 
   constructor(private readonly opts: SurfacePanelOptions) {
-    this.surfacesDir = path.dirname(opts.filePath);
+    this.surfacesDir = opts.filePath ? path.dirname(opts.filePath) : '';
     this.routesDir = path.join(opts.workspaceRoot, '.obotovs', 'routes');
 
     this.panel = vscode.window.createWebviewPanel(
@@ -174,11 +176,11 @@ export class SurfacePanel {
 
     });
 
-    this.render();
+    void this.render();
   }
 
   get name(): string { return this.opts.name; }
-  get filePath(): string { return this.opts.filePath; }
+  get filePath(): string | undefined { return this.opts.filePath; }
 
   /** Push a message to this surface on a named channel. */
   pushMessage(channel: string, data: unknown): void {
@@ -194,7 +196,7 @@ export class SurfacePanel {
     this.panel.webview.postMessage({ type: 'obotovs:routes', url });
     // Also re-render so new `fetch(window.__OBOTOVS_ROUTES_URL__ + …)` calls
     // on hard reload pick up the new URL.
-    this.render();
+    void this.render();
   }
 
   reveal(): void {
@@ -235,13 +237,17 @@ export class SurfacePanel {
   }
 
   /** Called by the manager when the surface file changes on disk. */
-  reload(): void {
+  async reload(): Promise<void> {
     if (this.disposed) return;
     let newHtml = '';
     try {
-      newHtml = fs.readFileSync(this.opts.filePath, 'utf8');
+      if (this.opts.virtualHtmlProvider) {
+        newHtml = await this.opts.virtualHtmlProvider();
+      } else if (this.opts.filePath) {
+        newHtml = fs.readFileSync(this.opts.filePath, 'utf8');
+      }
     } catch (err) {
-      this.render();
+      await this.render();
       return;
     }
 
@@ -253,7 +259,7 @@ export class SurfacePanel {
       this.panel.webview.postMessage({ type: 'obotovs:hmr', html: newHtml });
     } else {
       // Structural/Script changes — full reload
-      this.render();
+      await this.render();
     }
   }
 
@@ -261,12 +267,16 @@ export class SurfacePanel {
     if (!this.disposed) this.panel.dispose();
   }
 
-  private render(): void {
+  private async render(): Promise<void> {
     let userHtml = '';
     try {
-      userHtml = fs.readFileSync(this.opts.filePath, 'utf8');
+      if (this.opts.virtualHtmlProvider) {
+        userHtml = await this.opts.virtualHtmlProvider();
+      } else if (this.opts.filePath) {
+        userHtml = fs.readFileSync(this.opts.filePath, 'utf8');
+      }
     } catch (err) {
-      userHtml = `<!doctype html><html><body><pre style="color:#f87171;font-family:monospace;padding:2rem">Failed to read ${this.opts.filePath}\n${err instanceof Error ? err.message : String(err)}</pre></body></html>`;
+      userHtml = `<!doctype html><html><body><pre style="color:#f87171;font-family:monospace;padding:2rem">Failed to load surface content\\n${err instanceof Error ? err.message : String(err)}</pre></body></html>`;
     }
 
     this.lastUserHtml = userHtml;

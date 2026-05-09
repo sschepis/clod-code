@@ -138,6 +138,7 @@ export type AgentPhase =
   | 'validation'
   | 'memory'
   | 'continuation'
+  | 'chaperone'
   | 'error'
   | 'doom'
   | 'cancel'
@@ -320,6 +321,13 @@ export interface PickerProviderInfo {
  * routes it to the foreground slice. Kept optional for back-compat with the
  * single-agent path.
  */
+export interface ToolbarButton {
+  id: string;
+  icon: string;
+  tooltip: string;
+  actionId: string;
+}
+
 export type ExtToWebviewMessage =
   | { type: 'sync'; agentId?: string; events: SessionEvent[]; phase: PhaseState; cost: CostState; activeModel: ModelInfo; triageModel?: ModelInfo; routingMode?: RoutingMode; mode: 'act' | 'plan'; agents?: AgentSummary[]; focusedAgentId?: string }
   | { type: 'event'; agentId?: string; event: SessionEvent }
@@ -342,6 +350,7 @@ export type ExtToWebviewMessage =
   | { type: 'clear'; agentId?: string }
   | { type: 'slash_commands'; commands: SlashCommandInfo[] }
   | { type: 'clear_stale_errors'; agentId?: string }
+  | { type: 'tool_errors_summary'; agentId?: string; errorCount: number }
   // ── Multi-agent messages ─────────────────────────────────────────────
   | { type: 'agent_spawned'; agent: AgentSummary }
   | { type: 'agent_status'; agentId: string; status: AgentStatus; cost?: CostState; result?: string; error?: string; completedAt?: number }
@@ -358,7 +367,8 @@ export type ExtToWebviewMessage =
   // ── Speech-to-text ──────────────────────────────────────────────────
   | { type: 'recording_status'; status: 'idle' | 'recording' | 'transcribing' | 'error'; message?: string }
   | { type: 'recording_transcript'; text: string }
-  | { type: 'recording_error'; error: string };
+  | { type: 'recording_error'; error: string }
+  | { type: 'set_toolbar_buttons'; buttons: ToolbarButton[] };
 
 // ── Webview → Extension messages ──────────────────────────────────────
 
@@ -396,7 +406,9 @@ export type WebviewToExtMessage =
       id: string;
       /** extra context for the memory category (agentId for conversation scope). */
       agentId?: string;
-    };
+    }
+  | { type: 'execute_toolbar_action'; actionId: string }
+  | { type: 'show_tool_errors' };
 
 // ── Slash command info ────────────────────────────────────────────────
 

@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ThoughtBlock } from './ThoughtBlock';
 import { ToolBlock } from './ToolBlock';
+import { postMessage } from '../vscode-api';
 
 import { PermissionPrompt } from './PermissionPrompt';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -109,12 +110,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             </span>
           </div>
         );
-      case 'system':
+      case 'system': {
+        const errMatch = event.content.match(/^__TOOL_ERRORS__:(\d+)$/);
+        if (errMatch) {
+          const count = parseInt(errMatch[1], 10);
+          return (
+            <button
+              key={event.id || index}
+              onClick={() => postMessage({ type: 'show_tool_errors' })}
+              className="mx-6 my-2 px-4 py-2 flex items-center gap-2 text-xs font-medium rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer fade-in"
+            >
+              <AlertTriangle size={14} className="shrink-0" />
+              <span>{count} tool error{count !== 1 ? 's' : ''} occurred</span>
+              <span className="ml-auto text-red-400/60 underline">View log</span>
+            </button>
+          );
+        }
         return (
           <div key={event.id || index} className="px-6 py-3 text-xs text-vscode-desc italic border-b border-vscode-panelBorder/30 fade-in">
             {event.content}
           </div>
         );
+      }
       case 'permission':
         return (
           <PermissionPrompt

@@ -14,7 +14,7 @@ export function createFileWriteHandler(onFileChanged?: (filePath: string) => voi
       let oldContent = '';
       let isNew = false;
       const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
-      if (doc) {
+      if (doc && doc.isDirty) {
         oldContent = doc.getText();
       } else {
         try {
@@ -42,6 +42,7 @@ export function createFileWriteHandler(onFileChanged?: (filePath: string) => voi
         );
         edit.replace(uri, fullRange, content);
         await vscode.workspace.applyEdit(edit);
+        await doc.save();
       } else {
         await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
       }

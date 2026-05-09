@@ -290,7 +290,7 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
       const uri = vscode.Uri.file(filePath);
       let content: string;
       const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
-      if (doc) {
+      if (doc && doc.isDirty) {
         content = doc.getText();
       } else {
         const existing = await vscode.workspace.fs.readFile(uri);
@@ -479,6 +479,10 @@ export function createFileEditHandler(onFileChanged?: (filePath: string) => void
 async function applyContent(uri: vscode.Uri, originalContent: string, updatedContent: string): Promise<void> {
   const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
   if (doc) {
+    // Apply via WorkspaceEdit for undo support, then save immediately
+    // so disk and in-memory stay coherent. This prevents "phantom edits"
+    // where subsequent reads see stale in-memory content that diverges
+    // from what's on disk.
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       doc.positionAt(0),
@@ -486,6 +490,7 @@ async function applyContent(uri: vscode.Uri, originalContent: string, updatedCon
     );
     edit.replace(uri, fullRange, updatedContent);
     await vscode.workspace.applyEdit(edit);
+    await doc.save();
   } else {
     await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedContent));
   }

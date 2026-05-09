@@ -13,7 +13,7 @@ const CYCLE_DELAY = 3000;
 const FADE_DURATION = 150;
 
 const SPINNER_PHASES = new Set<AgentPhase>([
-  'thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory',
+  'thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory', 'chaperone'
 ]);
 
 const PHASE_CONFIG: Record<AgentPhase, { icon: React.ReactNode; color: string; animate?: boolean }> = {
@@ -26,6 +26,7 @@ const PHASE_CONFIG: Record<AgentPhase, { icon: React.ReactNode; color: string; a
   validation: { icon: <CheckCircle size={14} />, color: 'text-emerald-400' },
   memory: { icon: <Database size={14} />, color: 'text-purple-400' },
   continuation: { icon: <RotateCcw size={14} />, color: 'text-cyan-400', animate: true },
+  chaperone: { icon: <Brain size={14} />, color: 'text-pink-400', animate: true },
   error: { icon: <AlertTriangle size={14} />, color: 'text-red-400' },
   doom: { icon: <AlertTriangle size={14} />, color: 'text-red-500' },
   cancel: { icon: <XCircle size={14} />, color: 'text-vscode-desc' },

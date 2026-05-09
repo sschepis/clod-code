@@ -6,6 +6,7 @@ import type { ChatPanelManager } from './chat-panel-manager';
 import type { ExplorerNode, ExplorerProvider } from './explorer-provider';
 import { PROVIDERS } from '../config/provider-registry';
 import { SettingsPanel } from './settings-panel';
+import { WelcomePanel } from './welcome-panel';
 import { logger } from '../shared/logger';
 
 /**
@@ -25,6 +26,23 @@ export function registerCommands(
   SettingsPanel.initialize(context);
 
   // ── Always-available commands ────────────────────────────────────
+
+  // Show welcome page — always works
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMANDS.SHOW_WELCOME, () => {
+      logger.info('Opening welcome panel');
+      WelcomePanel.createOrShow(context.extensionUri);
+    })
+  );
+
+  // Auto-show welcome on first activation (or new version)
+  const WELCOME_VERSION_KEY = 'obotovs.welcomeShownVersion';
+  const currentVersion: string = vscode.extensions.getExtension('nomyx-inc.obotovs')?.packageJSON?.version ?? '0.0.0';
+  const lastShownVersion = context.globalState.get<string>(WELCOME_VERSION_KEY);
+  if (lastShownVersion !== currentVersion) {
+    WelcomePanel.createOrShow(context.extensionUri);
+    context.globalState.update(WELCOME_VERSION_KEY, currentVersion);
+  }
 
   // Open settings panel — always works
   context.subscriptions.push(

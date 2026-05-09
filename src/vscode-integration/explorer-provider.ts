@@ -62,6 +62,15 @@ export class ExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>, 
     this._watcher.onDidCreate(() => this.refresh());
     this._watcher.onDidChange(() => this.refresh());
     this._watcher.onDidDelete(() => this.refresh());
+
+    vscode.commands.registerCommand('obotovs.explorer.handleAction', (contributorId: string, nodeId: string | undefined, actionId: string, data: any) => {
+      const contributor = this.contributors.get(contributorId);
+      if (contributor && contributor.handleAction) {
+        Promise.resolve(contributor.handleAction(nodeId, actionId, data)).catch(err => {
+          vscode.window.showErrorMessage(`Action failed: ${err.message}`);
+        });
+      }
+    });
   }
 
   createTreeView(): vscode.TreeView<ExplorerNode> {
@@ -470,7 +479,9 @@ if (element.nodeType === 'contributed-root' || element.nodeType === 'contributed
       : c.collapsibleState === 'collapsed' ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None;
     const icon = c.iconId ? new vscode.ThemeIcon(c.iconId) : undefined;
-    const cmd = c.command ? { command: c.command.command, title: c.command.title, arguments: c.command.arguments as any[] | undefined } : undefined;
+    const cmd = c.actionId 
+      ? { command: 'obotovs.explorer.handleAction', title: 'Action', arguments: [contributorId, c.contributorNodeId, c.actionId, c.data] }
+      : c.command ? { command: c.command.command, title: c.command.title, arguments: c.command.arguments as any[] | undefined } : undefined;
     const node = new ExplorerNode(c.label, state, 'contributed-item', undefined, icon, cmd);
     node.contributorId = contributorId;
     node.contributorNodeId = c.contributorNodeId;

@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, 'index.html'),
         settings: resolve(__dirname, 'settings.html'),
+        welcome: resolve(__dirname, 'welcome.html'),
       },
       output: {
         entryFileNames: 'assets/[name].js',

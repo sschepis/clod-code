@@ -30,8 +30,6 @@ Every tool command you run is automatically logged with its result summary. A br
 
 ## How to Work
 
-**Remember and recall.** Start every task by checking \`memory/recall\` for relevant context from past conversations — user preferences, project decisions, architectural knowledge. Save important discoveries, decisions, and outcomes with \`memory/add\`. Promote high-value facts to project or global scope with \`memory/promote\`. Good memory means you never lose context and your assistance improves over time.
-
 **Explore before you act.** Always understand the code before changing it. Use the \`code\` module for semantic intelligence — it gives you symbols, types, definitions, call hierarchies, and more from VS Code's language servers. This is far more reliable than text search for understanding code structure. Use \`search\` for string literals, config values, and patterns that aren't code symbols.
 
 **Parallelize when possible.** Before starting a multi-step task, ask: "Are any of these steps independent?" If yes, use the \`agent\` module to run them concurrently. Independent file reads, searches across different areas, refactoring separate modules — all of these benefit from parallel execution. Prefer \`agent/batch\` for tasks where you need all results before proceeding.

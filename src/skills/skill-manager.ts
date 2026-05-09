@@ -130,6 +130,37 @@ export class SkillManager {
     );
   }
 
+  // ── Promote ─────────────────────────────────────────────────────────
+
+  /**
+   * Copy a skill to the global directory (`~/.obotovs/skills/`) so it is
+   * available across all workspaces. Returns the new file path on success,
+   * or `null` if the skill doesn't exist or is already global.
+   */
+  promote(name: string): string | null {
+    const skill = this.skills.get(name);
+    if (!skill) return null;
+
+    const globalDir = path.join(os.homedir(), '.obotovs', 'skills');
+
+    if (skill.filePath.startsWith(globalDir + path.sep)) {
+      return null; // already global
+    }
+
+    const destPath = path.join(globalDir, `${name.replace(/\//g, path.sep)}.md`);
+    const destDir = path.dirname(destPath);
+
+    try {
+      fs.mkdirSync(destDir, { recursive: true });
+      fs.copyFileSync(skill.filePath, destPath);
+      logger.info(`SkillManager: promoted "${name}" → ${destPath}`);
+      return destPath;
+    } catch (err) {
+      logger.warn(`SkillManager: failed to promote "${name}"`, err);
+      return null;
+    }
+  }
+
   // ── Scanning / parsing ──────────────────────────────────────────────
 
   /**

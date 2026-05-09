@@ -28,6 +28,12 @@ export interface ExplorerContributor {
    *   contributor) to resolve its children on expand.
    */
   getChildren(node: ContributedNode | undefined): Promise<ContributedNode[]> | ContributedNode[];
+  
+  /**
+   * Optional command handler for this contributor's custom actions.
+   * If a ContributedNode specifies an actionId, clicking it triggers this method.
+   */
+  handleAction?(nodeId: string | undefined, actionId: string, payload: any): Promise<void> | void;
 }
 
 export interface ContributedNode {
@@ -42,6 +48,8 @@ export interface ContributedNode {
   contextValue?: string;
   /** Command to invoke when the node is clicked. */
   command?: { command: string; title: string; arguments?: unknown[] };
+  /** Dynamic action routing (alternative to command). If set, triggers contributor.handleAction. */
+  actionId?: string;
   /** Opaque payload the contributor can stash for its own use. */
   data?: unknown;
 }

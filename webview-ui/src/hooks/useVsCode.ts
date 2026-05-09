@@ -124,6 +124,10 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     [],
   );
 
+  const executeToolbarAction = useCallback((actionId: string) => {
+    postMessage({ type: 'execute_toolbar_action', actionId });
+  }, []);
+
   return {
     submit,
     interrupt,
@@ -143,5 +147,6 @@ export function useVsCode(onExtMessage: (msg: ExtToWebviewMessage) => void) {
     cancelAgent,
     requestObjectsSync,
     objectAction,
+    executeToolbarAction,
   };
 }

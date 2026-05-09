@@ -31,10 +31,11 @@ import {
   createUiScreenshotHandler, createUiCursorHandler,
   createUiMoveHandler, createUiClickHandler, createUiDragHandler,
   createUiTypeHandler, createUiPressHandler,
-  createSkillListHandler, createSkillGetHandler,
+  createSkillListHandler, createSkillGetHandler, createSkillPromoteHandler,
   createPeerListHandler, createPeerDebugHandler, createPeerSendHandler,
   createPeerDispatchHandler, createPeerStatusHandler,
   createPeerAskHandler, createPeerAskStatusHandler, createPeerCancelHandler,
+  createRelayStartHandler, createRelayStopHandler, createRelayStatusHandler, type RelayToolDeps,
   createRefactorPipelineHandler, createRefactorRegexHandler,
   createMemoryAddHandler, createMemoryRecallHandler, createMemoryPromoteHandler,
   createMemoryListHandler, createMemoryForgetHandler,
@@ -105,6 +106,7 @@ import {
 } from '../tools/data-ops';
 import { createCodeRunHandler, type CodeRunDeps } from '../tools/code-run';
 import { createServiceListHandler, createServiceConfigureHandler, type ServiceToolDeps } from '../tools/service-ops';
+import type { ToolProblemReporter } from '../tools/problem-reporter';
 
 export interface ToolTreeResult {
   router: Router;
@@ -153,6 +155,10 @@ export interface ToolTreeDeps {
   codeRun?: CodeRunDeps;
   /** External service discovery and configuration. */
   service?: ServiceToolDeps;
+  /** Relay server manager */
+  relay?: RelayToolDeps;
+  /** Problem reporter — logs all tool errors to a dedicated output channel. */
+  problemReporter?: ToolProblemReporter;
 }
 
 /**
@@ -241,7 +247,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── Web search, fetch & browse ──────────────────────────────
-    .branch('web', 'Search the internet, fetch web pages, and browse with a headless browser. Use web/search to find information online (docs, errors, APIs). Use web/fetch for lightweight content extraction from a URL. Use web/browse to launch a headless Chrome session with screenshots — followed by web/click, web/type, web/screenshot, web/eval for interactive browsing. Prefer local tools (search/grep, code/explore) for workspace code; use web/* for external information.', (web) => {
+    .branch('web', 'Web search, fetch, and headless Chrome browsing for external information.', (web) => {
       web
         .leaf('search', {
           description: 'Search the internet. Returns titles, URLs, and snippets. Use for docs, API references, error solutions, package info. No API key required (DuckDuckGo by default; set BRAVE_SEARCH_API_KEY for better results).',
@@ -828,6 +834,13 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
             name: { type: 'string', description: 'The skill name (as shown by `skill list`)' },
           },
           handler: createSkillGetHandler(deps.skill),
+        })
+        .leaf('promote', {
+          description: 'Promote a workspace skill to global scope so it becomes available in all workspaces. Copies the skill file to ~/.obotovs/skills/.',
+          requiredArgs: {
+            name: { type: 'string', description: 'The skill name to promote (as shown by `skill list`)' },
+          },
+          handler: createSkillPromoteHandler(deps.skill),
         });
     });
 
@@ -1015,39 +1028,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
 
     builder
     // ── Surfaces (AI-authored HTML pages rendered in VS Code panels) ──
-    .branch('surface', [
-      'Create, update, delete, list, and open surface HTML pages.',
-      '',
-      'Surfaces are self-contained HTML files stored at .obotovs/surfaces/<name>.html and rendered in VS Code webview panels.',
-      'They are ideal for dashboards, visualizations, forms, documentation viewers, or any interactive UI the user needs.',
-      '',
-      'HOW TO WRITE A SURFACE:',
-      '- Provide a complete HTML document including <!DOCTYPE html>, <html>, <head>, and <body>.',
-      '- Use inline <style> and <script> tags — external file references are not supported.',
-      '- CDN scripts and stylesheets ARE allowed. Common choices:',
-      '  • Tailwind CSS: <script src="https://cdn.tailwindcss.com"></script>',
-      '  • React + ReactDOM (UMD): <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>',
-      '  • Chart.js, D3, Mermaid, Marked, etc. via unpkg/cdnjs/jsdelivr.',
-      '- To call local API routes from a surface, use the global `window.__OBOTOVS_ROUTES_URL__`.',
-      '  This is injected automatically and points to the local route server (e.g. http://localhost:PORT).',
-      '  Example: fetch(`${window.__OBOTOVS_ROUTES_URL__}/api/data`).then(r => r.json())',
-      '',
-      'REAL-TIME CHANNEL API (window.__obotovs):',
-      '- Every surface gets a `window.__obotovs` object injected automatically.',
-      '- __obotovs.on(channel, handler)  — Subscribe to messages pushed by the agent or other surfaces.',
-      '- __obotovs.off(channel, handler) — Unsubscribe from a channel.',
-      '- __obotovs.emit(channel, data)   — Send a message to the extension (routed to the agent).',
-      '- __obotovs.executeTool(tool, kwargs) — Execute a tool and get a Promise with the result.',
-      '- __obotovs.submitToAgent(text)   — Submit text to the agent (like typing in the chat).',
-      '- Use surface/push to push data from the agent to a specific surface.',
-      '- Use surface/broadcast to push data to all open surfaces.',
-      '',
-      'AUTO-REFRESH BEHAVIOR:',
-      '- When you call surface/create, the panel opens automatically (if surfacesAutoOpen is enabled).',
-      '- When you call surface/update, any open panel showing that surface is refreshed in-place immediately.',
-      '- A file watcher also detects manual edits to surface files and refreshes open panels.',
-      '- No need to call surface/open after surface/update — the refresh is automatic.',
-    ].join('\n'), (s) => {
+    .branch('surface', 'Manage HTML surfaces rendered in VS Code webview panels. Stored at .obotovs/surfaces/<name>.html. CDN imports allowed. Use window.__obotovs for real-time messaging and window.__OBOTOVS_ROUTES_URL__ for API calls. Auto-refreshes on update.', (s) => {
       s
         .leaf('list', {
           description: 'List all surfaces in .obotovs/surfaces/. Returns name + file path for each.',
@@ -1127,47 +1108,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     })
 
     // ── Routes (Next.js App Router-style API endpoints) ────────────
-    .branch('route', [
-      'Create, update, delete, list API routes served from .obotovs/routes/.',
-      '',
-      'Routes are ES-module files at .obotovs/routes/<path>/route.js following the Next.js App Router convention.',
-      'A local HTTP server starts automatically when the first route is created and serves all routes.',
-      'Surfaces can call routes via window.__OBOTOVS_ROUTES_URL__ (injected into every surface).',
-      '',
-      'ROUTE FILE FORMAT:',
-      '- Export named functions for each HTTP method: GET, POST, PUT, DELETE, PATCH.',
-      '- Handler signature: async function METHOD(request, context) → Response | object',
-      '  • request: { method, url, headers, body (parsed JSON or text), query (URLSearchParams object) }',
-      '  • context: { params, store } — params are dynamic segment values; store is a shared Map across all routes',
-      '  • Return a Response object, or return a plain object/string (auto-wrapped as JSON 200).',
-      '  • To set status/headers: return new Response(JSON.stringify(data), { status: 201, headers: { ... } })',
-      '',
-      'WEBSOCKET SUPPORT:',
-      '- Export a WEBSOCKET(ws, req, context) function for WebSocket connections.',
-      '- Surfaces connect via: new WebSocket(`ws://127.0.0.1:PORT/api/my-route`)',
-      '- ws.send(data), ws.on("message", handler), ws.on("close", handler), ws.close()',
-      '- Example: export function WEBSOCKET(ws, req, { params, store }) {',
-      '    ws.on("message", (msg) => ws.send(JSON.stringify({ echo: msg })));',
-      '  }',
-      '',
-      'DYNAMIC SEGMENTS:',
-      '- Use [brackets] in the path for dynamic parameters: "users/[id]" → params.id',
-      '- Nested dynamics work: "projects/[projectId]/tasks/[taskId]"',
-      '',
-      'EXAMPLE:',
-      '  // Route path: "items"',
-      '  const items = [];',
-      '  export async function GET() { return items; }',
-      '  export async function POST(req) {',
-      '    items.push(req.body);',
-      '    return new Response(JSON.stringify(req.body), { status: 201 });',
-      '  }',
-      '',
-      'HOT-RELOAD:',
-      '- When you call route/create or route/update, the server rescans and reloads the route immediately.',
-      '- Updated code takes effect on the next request — no server restart needed.',
-      '- A file watcher also detects manual edits and triggers rescan.',
-    ].join('\n'), (r) => {
+    .branch('route', 'API routes at .obotovs/routes/<path>/route.js (Next.js App Router convention). Export GET/POST/PUT/DELETE/PATCH handlers. Supports dynamic segments ([id]), WebSockets, and hot-reload.', (r) => {
       r
         .leaf('list', {
           description: 'List all registered routes with their URL path and file path. Use route/info for server status.',
@@ -1212,18 +1153,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
 
     // ── Data (Gun.js-backed persistent data store) ────────────────
     if (deps.data) {
-      builder.branch('data', [
-        'Read, write, and query persistent data stored in a Gun.js graph database.',
-        '',
-        'Data is stored locally in .obotovs/gun-data/ and syncs in real-time across',
-        'all connected VS Code instances (local windows and remote peers via relays).',
-        '',
-        'PATHS: Use slash-separated paths to address nodes in the graph.',
-        '  Example: "users/alice", "settings/theme", "tasks"',
-        '',
-        'COLLECTIONS: Use data/add to append to a collection (auto-generates an ID).',
-        'Use data/list to enumerate children at a path.',
-      ].join('\n'), (d) => {
+      builder.branch('data', 'Persistent Gun.js graph store at .obotovs/gun-data/. Syncs across windows and peers. Use slash-separated paths (e.g. "users/alice").', (d) => {
         d
           .leaf('get', {
             description: 'Read data at a path. Returns the stored value as JSON.',
@@ -1261,18 +1191,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
 
     builder
     // ── Refactor (aegis-pipe: structured code transformations) ─────
-    .branch('refactor', [
-      'Structured code transformation pipeline powered by aegis-pipe.',
-      'Use refactor/* for multi-step, validated, transactional edits that go beyond simple string replacement.',
-      '',
-      'Prefer file/edit for simple, targeted changes. Use refactor/* when you need:',
-      '- Regex-based find-and-replace across a file',
-      '- Multi-step transformation pipelines with atomic rollback',
-      '- Dry-run previews of complex changes before applying',
-      '',
-      'All operations support dry_run mode (default) which shows a unified diff without modifying the file.',
-      'Set execution_mode="apply" to write changes. Applied changes support undo when the file is open.',
-    ].join('\n'), (r) => {
+    .branch('refactor', 'Multi-step code transformations with atomic rollback via aegis-pipe. Supports regex find-replace and pipelines. Dry-run by default.', (r) => {
       r
         .leaf('pipeline', {
           description: [
@@ -1486,21 +1405,38 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         });
     });
 
+  if (deps.relay) {
+    builder.branch('relay', 'Manage the local Gun.js RPC relay server', (r) => {
+      r
+        .leaf('start', {
+          description: 'Start the Gun relay server on a specific port',
+          optionalArgs: {
+            port: { type: 'number', description: 'Port to run on (default 8765)' },
+          },
+          handler: createRelayStartHandler(deps.relay!),
+        })
+        .leaf('stop', {
+          description: 'Stop the Gun relay server',
+          handler: createRelayStopHandler(deps.relay!),
+        })
+        .leaf('status', {
+          description: 'Get the status of the Gun relay server',
+          handler: createRelayStatusHandler(deps.relay!),
+        });
+    });
+  }
+
   // ── Background agents (foreground-only) ────────────────────────────
   // The agent branch is wired only when AgentToolDeps is provided. Phase 1
   // scope: only the foreground agent receives this branch so spawned
   // agents cannot recursively spawn further agents.
   if (deps.agent) {
     const agentDeps = deps.agent;
-    builder.branch('agent', 'Spawn background agents for parallel work. Use agent/spawn to delegate independent subtasks (file searches, refactors, test runs) while you continue working. Use agent/batch to run multiple tasks and wait for all results. Use agent/collect to gather results from previously-spawned agents. Always prefer parallelism when tasks are independent — it is dramatically faster.', (a) => {
+    builder.branch('agent', 'Spawn background agents for parallel work. Use agent/batch for multiple independent tasks, agent/spawn for single fire-and-forget tasks.', (a) => {
       a
         .leaf('spawn', {
           description:
-            'Spawn a background agent to run a task in parallel. ' +
-            'Use this when you want to delegate a subtask while continuing your own work — ' +
-            'e.g., kick off a test run, a code search, or a file refactor while you work on something else. ' +
-            'Returns immediately with an instance_id (use agent/collect or agent/query to get results later). ' +
-            'Pass await=true to block until the agent finishes and return its result directly.',
+            'Spawn a background agent. Returns instance_id immediately (use agent/collect or agent/query for results). Pass await=true to block until done.',
           requiredArgs: {
             task: { type: 'string', description: 'The task prompt the background agent should execute' },
           },
@@ -1550,11 +1486,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         })
         .leaf('batch', {
           description:
-            'Spawn multiple background agents and wait for all to complete. ' +
-            'This is your primary parallelism tool — reach for it whenever a task can be split into 2+ independent pieces. ' +
-            'Examples: read/analyze multiple files, refactor several independent modules, run tests + lint simultaneously, ' +
-            'search for different patterns across the codebase. ' +
-            'Returns all results in one response. Default mode is parallel; sequential mode runs tasks one after another.',
+            'Spawn multiple agents and wait for all results. Default mode is parallel; use sequential for ordered execution.',
           requiredArgs: {
             tasks: { type: 'json', description: 'Array of {task, label?, model?, provider?} objects' },
           },
@@ -1567,9 +1499,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
         })
         .leaf('collect', {
           description:
-            'Wait for multiple previously-spawned agents to complete and return all their results. ' +
-            'Use after fire-and-forget agent/spawn calls when you are ready to use their results. ' +
-            'Typical pattern: spawn 3 agents → do your own work → agent/collect all 3 before synthesizing.',
+            'Wait for previously-spawned agents and return all results.',
           requiredArgs: {
             instance_ids: { type: 'json', description: 'Array of agent instance IDs to await' },
           },
@@ -1590,16 +1520,12 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     const memBranch = new BranchNode({
       name: 'memory',
       description:
-        'Hierarchical memory system — USE THIS ACTIVELY. Start every task with memory/recall to check for relevant context from past work. ' +
-        'Save discoveries, user preferences, architectural decisions, and task outcomes with memory/add. ' +
-        'Three scopes: conversation (this session, default), project (persists across conversations in this workspace), global (across all workspaces). ' +
-        'Use memory/promote to elevate important facts to project or global scope. ' +
-        'Good memory hygiene means you never lose context across sessions and your assistance improves over time.',
+        'Durable memory across three scopes: conversation (this session), project (this workspace), global (all workspaces). Start tasks with memory/recall; save with memory/add; promote important facts with memory/promote.',
     });
     memBranch.addChild(new LeafNode({
       name: 'add',
       description:
-        'Save a fact, preference, or discovery to conversation memory. Do this proactively — save user preferences, architectural decisions, task outcomes, and anything that would be useful in future conversations. Use memory/promote afterward to elevate important facts to project or global scope.',
+        'Save a fact or discovery to conversation memory. Use memory/promote to elevate to project or global scope.',
       requiredArgs: {
         title: { type: 'string', description: 'Short label (e.g. "user prefers Python")' },
         body: { type: 'string', description: 'The fact or note to remember' },
@@ -1613,7 +1539,7 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
     memBranch.addChild(new LeafNode({
       name: 'recall',
       description:
-        'Retrieve relevant memories by semantic resonance. Call this at the START of every new task to check for prior context — user preferences, past decisions, project knowledge. Returns top matches across conversation/project/global by default. Also useful mid-task to recall specific facts.',
+        'Search memories by semantic similarity. Returns top matches across all scopes by default.',
       requiredArgs: {
         query: { type: 'string', description: 'Free-text query; tokens guide the match' },
       },
@@ -1680,6 +1606,10 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
   router.use(createNotesMiddleware(sessionNotes));
   // Middleware: block shell commands that have dedicated tools
   router.use(createRedirectMiddleware(STANDARD_REDIRECTS));
+  // Middleware: log all tool errors to the dedicated output channel
+  if (deps.problemReporter) {
+    router.use(deps.problemReporter.createMiddleware());
+  }
 
   return { router, session, notes: sessionNotes };
 }

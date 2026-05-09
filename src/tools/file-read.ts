@@ -9,9 +9,15 @@ export function createFileReadHandler() {
       const uri = vscode.Uri.file(filePath);
       let text: string;
       const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === uri.fsPath);
-      if (doc) {
+      if (doc && doc.isDirty) {
+        // Document has unsaved in-memory edits — use the in-memory version
+        // (our file/edit and file/write tools save immediately, so this
+        // typically means a manual editor change that hasn't been saved yet).
         text = doc.getText();
       } else {
+        // Always read from disk when the document is clean (or not open).
+        // This prevents returning stale in-memory content when an external
+        // process or shell tool has modified the file on disk.
         const content = await vscode.workspace.fs.readFile(uri);
         text = new TextDecoder().decode(content);
       }

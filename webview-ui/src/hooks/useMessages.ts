@@ -27,6 +27,7 @@ export interface AppState {
   peers: PeerUiSnapshot[];
   outboundDispatches: OutboundDispatchUi[];
   objects: ObjectSnapshot;
+  toolbarButtons: import('../../../src/shared/message-types').ToolbarButton[];
 }
 
 const EMPTY_OBJECTS: ObjectSnapshot = {
@@ -78,6 +79,7 @@ const INITIAL_STATE: AppState = {
   peers: [],
   outboundDispatches: [],
   objects: EMPTY_OBJECTS,
+  toolbarButtons: [],
 };
 
 function ensureSlice(state: AppState, agentId: string, seedModel?: ModelInfo, triageModel?: ModelInfo, routingMode?: RoutingMode): AgentUiSlice {
@@ -413,6 +415,10 @@ export function useMessages() {
     });
   }, []);
 
+  const setToolbarButtons = useCallback((buttons: import('../../../src/shared/message-types').ToolbarButton[]) => {
+    setState(prev => ({ ...prev, toolbarButtons: buttons }));
+  }, []);
+
   return {
     state,
     focusedSlice,
@@ -446,5 +452,6 @@ export function useMessages() {
     setOutboundDispatches,
     setObjects,
     setSyncMetrics,
+    setToolbarButtons,
   };
 }

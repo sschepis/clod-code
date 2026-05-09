@@ -30,6 +30,7 @@ export {
   createMemoryForgetHandler,
 } from './memory-tools';
 export type { MemoryToolDeps } from './memory-tools';
+export * from './relay-ops';
 export {
   createSurfaceHandlers,
   createSurfaceListHandler,
@@ -76,6 +77,7 @@ export {
   createSkillHandlers,
   createSkillListHandler,
   createSkillGetHandler,
+  createSkillPromoteHandler,
 } from './skill-ops';
 export type { SkillToolDeps } from './skill-ops';
 export {
@@ -163,3 +165,4 @@ export {
   createServiceHandlers,
 } from './service-ops';
 export type { ServiceToolDeps } from './service-ops';
+export { ToolProblemReporter } from './problem-reporter';

@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_SYSTEM_PROMPT } from '../config/defaults';
-import { MEMORY_SECTION } from '../prompts/memory';
 import type { SkillManager } from '../skills/skill-manager';
 import type { ProjectManager } from '../projects/project-manager';
 
@@ -50,8 +49,6 @@ export function buildSystemPrompt(arg: string | BuildSystemPromptOptions): strin
   if (projectSnippet) {
     parts.push('\n\n' + projectSnippet);
   }
-
-  parts.push('\n\n' + MEMORY_SECTION);
 
   // Runtime context
   parts.push('\n\n## Environment');

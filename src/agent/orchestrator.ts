@@ -46,6 +46,7 @@ import { DispatchRegistry } from '../peers/dispatch-registry';
 import { PeerAskRegistry } from '../peers/peer-ask-registry';
 import { MemoryManager } from './memory/memory-manager';
 import { ServiceRegistry } from '../services/service-registry';
+import { GunRelayServer } from '../peers/gun-relay';
 import type { AgentSyncMonitor } from './sync';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -100,6 +101,8 @@ function truncateForMemory(s: string): string {
     : `${trimmed.slice(0, MAX_ATTACHMENT_TEXT_LENGTH)}…`;
 }
 
+import { ToolbarRegistry } from '../vscode-integration/toolbar-registry';
+
 export class Orchestrator {
   private sidebar: SidebarProvider;
   private sessionStore: SessionStore;
@@ -141,8 +144,16 @@ export class Orchestrator {
   private onSessionCleared?: () => void;
   private diagnosticCollection?: vscode.DiagnosticCollection;
   private decorationManager?: import('../tools').DecorationManager;
+  private reviewCommentCb?: (uri: vscode.Uri, line: number, text: string) => void;
   private browserSessions = new Map<string, BrowserSession>();
   private gunStore?: import('../data/gun-store').GunStore;
+  private gunRelay: GunRelayServer;
+  public readonly toolbarRegistry: ToolbarRegistry;
+  private problemReporter?: import('../tools/problem-reporter').ToolProblemReporter;
+
+  public get surfaceManagerInstance(): SurfaceManager {
+    return this.surfaceManager;
+  }
 
   private setContext(key: string, value: boolean): void {
     vscode.commands.executeCommand('setContext', key, value);
@@ -162,7 +173,10 @@ export class Orchestrator {
     this.extensionPath = extensionPath;
     this.windowId = windowId;
 
+    this.gunRelay = new GunRelayServer();
+
     this.bridge = new WebviewBridge();
+    this.toolbarRegistry = new ToolbarRegistry(this.bridge);
     this.bridge.registerTarget('sidebar', sidebar);
     if (extensionContext) {
       this.memoryManager = new MemoryManager(extensionContext);
@@ -859,6 +873,7 @@ export class Orchestrator {
 
     this.speechToText?.dispose();
     this.gunStore?.dispose();
+    void this.gunRelay.stop();
     void this.peerManager.stop();
     void this.routeManager.stop();
     this.surfaceManager.dispose();
@@ -907,6 +922,14 @@ export class Orchestrator {
 
   setDecorationManager(manager: import('../tools').DecorationManager): void {
     this.decorationManager = manager;
+  }
+
+  setReviewCommentCallback(cb: (uri: vscode.Uri, line: number, text: string) => void): void {
+    this.reviewCommentCb = cb;
+  }
+
+  setProblemReporter(reporter: import('../tools/problem-reporter').ToolProblemReporter): void {
+    this.problemReporter = reporter;
   }
 
   getAgentSummaries(): import('../shared/message-types').AgentSummary[] {
@@ -1419,6 +1442,8 @@ export class Orchestrator {
         },
       },
       data: this.gunStore ? { store: this.gunStore } : undefined,
+      relay: { server: this.gunRelay },
+      problemReporter: this.problemReporter,
       codeRun: {
         pushToSurface: (name, channel, data) => this.surfaceManager.pushToSurface(name, channel, data),
       },
@@ -1873,8 +1898,16 @@ export class Orchestrator {
         this.broadcastObjects();
         break;
 
+      case 'execute_toolbar_action':
+        void this.toolbarRegistry.executeAction(msg.actionId);
+        break;
+
       case 'object_action':
         await this.handleObjectAction(msg.category, msg.action, msg.id, msg.agentId);
+        break;
+
+      case 'show_tool_errors':
+        this.problemReporter?.show();
         break;
     }
   }

@@ -32,6 +32,9 @@ export const COMMANDS = {
   SURFACE_VIEW_SOURCE: 'obotovs.surface.viewSource',
   SURFACE_INSPECT: 'obotovs.surface.inspect',
   SURFACE_OPEN_IN_BROWSER: 'obotovs.surface.openInBrowser',
+  SHOW_WELCOME: 'obotovs.showWelcome',
+  FIX_WITH_OBOTO: 'obotovs.fixWithOboto',
+  FIX_FROM_TERMINAL: 'obotovs.fixFromTerminal',
 } as const;
 
 export const ENV_KEY_MAP: Record<string, string> = {
