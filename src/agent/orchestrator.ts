@@ -45,6 +45,7 @@ import { PeerManager } from '../peers/peer-manager';
 import { DispatchRegistry } from '../peers/dispatch-registry';
 import { PeerAskRegistry } from '../peers/peer-ask-registry';
 import { MemoryManager } from './memory/memory-manager';
+import { FleetMeshManager } from './fleet-mesh-manager';
 import type { AgentSyncMonitor } from './sync';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -138,6 +139,7 @@ export class Orchestrator {
   private diagnosticCollection?: vscode.DiagnosticCollection;
   private decorationManager?: import('../tools').DecorationManager;
   private browserSessions = new Map<string, BrowserSession>();
+  private fleetMesh?: FleetMeshManager;
 
   private setContext(key: string, value: boolean): void {
     vscode.commands.executeCommand('setContext', key, value);
@@ -608,6 +610,20 @@ export class Orchestrator {
       logger.warn('Sync monitor init failed — cross-agent sync will be unavailable', err);
     }
 
+    // Fleet mesh (non-fatal — fleet tools degrade gracefully)
+    if (process.env.MESH_PEERS) {
+      try {
+        this.fleetMesh = new FleetMeshManager();
+        await this.fleetMesh.start();
+        this.fleetMesh.onEvent((event) => {
+          this.surfaceManager.broadcastMeshEvent(event);
+        });
+      } catch (err) {
+        logger.warn('Fleet mesh init failed — fleet tools will be unavailable', err);
+        this.fleetMesh = undefined;
+      }
+    }
+
     await this.createForeground();
     this.setContext('obotovs.agentReady', true);
     this.setContext('obotovs.hasSession', true);
@@ -815,6 +831,7 @@ export class Orchestrator {
     if (this.memoryChangeUnsubscribe) this.memoryChangeUnsubscribe();
     if (this.objectsBroadcastTimer) clearTimeout(this.objectsBroadcastTimer);
     this.objectsWatcher?.dispose();
+    if (this.fleetMesh) void this.fleetMesh.shutdown();
     for (const session of this.browserSessions.values()) session.dispose();
     this.browserSessions.clear();
   }
@@ -1351,6 +1368,7 @@ export class Orchestrator {
           return session;
         },
       },
+      fleet: this.fleetMesh?.getFleetToolDeps(),
     });
   }
 

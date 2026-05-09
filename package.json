@@ -649,7 +649,7 @@
     "postinstall": "node scripts/patch-oboto-agent.js"
   },
   "dependencies": {
-    "@aleph-ai/tinyaleph": "^1.7.3",
+    "@aleph-ai/tinyaleph": "^1.8.0",
     "@anthropic-ai/sdk": "^0.30.1",
     "@google-cloud/vertexai": "^1.12.0",
     "@google/generative-ai": "^0.21.0",

@@ -96,6 +96,11 @@ import {
   createWebEvalHandler,
   createWebCloseHandler,
   type WebBrowseDeps,
+  createFleetStatusHandler,
+  createFleetEventsHandler,
+  createFleetPodsHandler,
+  createFleetBroadcastHandler,
+  type FleetToolDeps,
 } from '../tools';
 
 export interface ToolTreeResult {
@@ -139,6 +144,8 @@ export interface ToolTreeDeps {
   onFileChanged?: (filePath: string) => void;
   /** Web browsing — headless Chrome session for search, fetch, and interactive browsing. */
   web?: WebBrowseDeps;
+  /** Fleet monitoring — connects to the ALEPH-PRIME P2P mesh for pod/event visibility. */
+  fleet?: FleetToolDeps;
 }
 
 /**
@@ -760,6 +767,48 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
           handler: createSpeakHandler(deps.tts),
         });
       }
+    })
+
+    // ── Fleet monitoring (ALEPH-PRIME mesh) ────────────────────────
+    .branch('fleet', 'Monitor and command the ALEPH-PRIME fleet. fleet/status shows pod health, conductor burn rate, and mechanic activity. fleet/events returns the mesh event stream. fleet/pods lists all pods or gets detail on one. fleet/broadcast sends a message to the mesh.', (f) => {
+      f
+        .leaf('status', {
+          description: 'Get aggregated fleet status: all pods, conductor, mechanic, mesh connectivity.',
+          handler: deps.fleet
+            ? createFleetStatusHandler(deps.fleet)
+            : async () => '[INFO] Fleet mesh not configured. Set MESH_PEERS to connect.',
+        })
+        .leaf('events', {
+          description: 'Get recent mesh events (heartbeats, errors, conductor/mechanic activity). Filter by type and limit count.',
+          optionalArgs: {
+            type: { type: 'string', description: 'Filter by event type (e.g. "system_error", "node_heartbeat")' },
+            limit: { type: 'number', description: 'Max events to return (default 50, max 200)', default: 50 },
+          },
+          handler: deps.fleet
+            ? createFleetEventsHandler(deps.fleet)
+            : async () => '[INFO] Fleet mesh not configured.',
+        })
+        .leaf('pods', {
+          description: 'List all pods or get detail on a specific pod by ID.',
+          optionalArgs: {
+            pod: { type: 'string', description: 'Pod ID to get detail for (omit for all pods)' },
+          },
+          handler: deps.fleet
+            ? createFleetPodsHandler(deps.fleet)
+            : async () => '[INFO] Fleet mesh not configured.',
+        })
+        .leaf('broadcast', {
+          description: 'Send a typed message to the fleet mesh. Use for fleet directives, commands, and coordination.',
+          requiredArgs: {
+            type: { type: 'string', description: 'Message type (e.g. "fleet_directive", "stop_trading")' },
+          },
+          optionalArgs: {
+            payload: { type: 'string', description: 'JSON payload to include with the message' },
+          },
+          handler: deps.fleet
+            ? createFleetBroadcastHandler(deps.fleet)
+            : async () => '[INFO] Fleet mesh not configured.',
+        });
     })
 
     // ── Skills (workspace-authored markdown skill files) ───────────

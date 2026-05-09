@@ -1,17 +1,115 @@
 import type { BaseProvider, StandardChatParams, StandardChatResponse } from '@sschepis/llm-wrapper';
 
+const NATIVE_CORE_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'code_explore',
+      description: 'Semantic code intelligence via VS Code language servers. ALWAYS use code/explore as your FIRST tool when investigating any code area. It returns symbols, type info, definitions, and call hierarchy in a single call.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to file to explore' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_read',
+      description: 'Read the contents of a file. Supports offset and limit for large files.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file to read' },
+          offset: { type: 'number', description: 'Line number to start reading from' },
+          limit: { type: 'number', description: 'Number of lines to read' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_edit',
+      description: 'Surgical file editing. Use for targeted changes instead of rewriting the whole file. Provide an array of edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file to edit' },
+          edits: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                old_string: { type: 'string', description: 'Exact string to replace. Must match the file content perfectly.' },
+                new_string: { type: 'string', description: 'The new string to insert' }
+              },
+              required: ['old_string', 'new_string']
+            }
+          }
+        },
+        required: ['path', 'edits']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_grep',
+      description: 'Search for text patterns inside files using regex. Best for finding literals and non-semantic code patterns.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory to search in' },
+          pattern: { type: 'string', description: 'Regex pattern to search for' }
+        },
+        required: ['path', 'pattern']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'shell_run',
+      description: 'Execute a shell command and return its output. Good for builds, tests, and CLI tasks.',
+      parameters: {
+        type: 'object',
+        properties: {
+          cmd: { type: 'string', description: 'Shell command to run' },
+          cwd: { type: 'string', description: 'Working directory for the command' }
+        },
+        required: ['cmd']
+      }
+    }
+  }
+];
+
+function injectNativeTools(params: StandardChatParams): StandardChatParams {
+  if (!params.tools) return params;
+  // Make a shallow copy of params and tools array
+  const newParams = { ...params };
+  newParams.tools = [...params.tools, ...NATIVE_CORE_TOOLS];
+  return newParams;
+}
+
 export function createDWIMProvider(provider: BaseProvider): BaseProvider {
   return new Proxy(provider, {
     get(target, prop, receiver) {
       if (prop === 'chat') {
         return async function (params: StandardChatParams): Promise<StandardChatResponse> {
-          const response = await target.chat(params);
+          const injectedParams = injectNativeTools(params);
+          const response = await target.chat(injectedParams);
           return interceptResponse(response);
         };
       }
       if (prop === 'stream') {
         return async function* (params: StandardChatParams) {
-          const stream = await target.stream(params);
+          const injectedParams = injectNativeTools(params);
+          const stream = await target.stream(injectedParams);
           for await (const chunk of stream) {
             yield interceptChunk(chunk);
           }
