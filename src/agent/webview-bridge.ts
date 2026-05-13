@@ -39,6 +39,7 @@ export interface WebviewTarget {
 interface AgentUiSlice {
   agentId: string;
   events: SessionEvent[];
+  eventIdIndex: Map<string, number>;
   phase: PhaseState;
   cost: CostState;
   activeModel: ModelInfo;
@@ -105,6 +106,7 @@ export class WebviewBridge {
       slice = {
         agentId,
         events: [],
+        eventIdIndex: new Map(),
         phase: { phase: 'idle', message: '' },
         cost: { totalTokens: 0, totalCost: 0 },
         activeModel: initialModel,
@@ -316,13 +318,22 @@ export class WebviewBridge {
       return;
     }
     slice.events.push(event);
+    slice.eventIdIndex.set(event.id, slice.events.length - 1);
     if (slice.events.length > MAX_EVENTS_PER_SLICE) {
       const dropped = slice.events.length - MAX_EVENTS_PER_SLICE;
       logger.info(`Slice "${agentId}": truncating ${dropped} oldest event(s) (cap=${MAX_EVENTS_PER_SLICE})`);
       slice.events.splice(0, dropped);
+      this.rebuildEventIdIndex(slice);
     }
     this.post({ type: 'event', agentId, event });
     this.notifySliceChanged(agentId);
+  }
+
+  private rebuildEventIdIndex(slice: AgentUiSlice): void {
+    slice.eventIdIndex.clear();
+    for (let i = 0; i < slice.events.length; i++) {
+      slice.eventIdIndex.set(slice.events[i].id, i);
+    }
   }
 
   /**
@@ -461,12 +472,11 @@ export class WebviewBridge {
         const lastIdx = slice.events.length - 1;
         const last = lastIdx >= 0 ? slice.events[lastIdx] : undefined;
         if (last && last.id === eventId && last.role === 'assistant') {
-          slice.events[lastIdx] = { ...last, content: last.content + event.text } as SessionEvent;
+          (last as any).content = (last as any).content + event.text;
         } else {
-          const existingIdx = slice.events.findIndex(e => e.id === eventId);
-          if (existingIdx !== -1 && slice.events[existingIdx].role === 'assistant') {
-            const existing = slice.events[existingIdx] as import('../shared/message-types').AssistantEvent;
-            slice.events[existingIdx] = { ...existing, content: existing.content + event.text };
+          const existingIdx = slice.eventIdIndex.get(eventId);
+          if (existingIdx !== undefined && slice.events[existingIdx]?.role === 'assistant') {
+            (slice.events[existingIdx] as any).content = (slice.events[existingIdx] as any).content + event.text;
           } else {
             slice.events.push({
               id: eventId,
@@ -476,10 +486,12 @@ export class WebviewBridge {
               agentName: this.getAgentDisplayName(agentId),
               timestamp: now(),
             });
+            slice.eventIdIndex.set(eventId, slice.events.length - 1);
             if (slice.events.length > MAX_EVENTS_PER_SLICE) {
               const dropped = slice.events.length - MAX_EVENTS_PER_SLICE;
               logger.info(`Slice "${agentId}": truncating ${dropped} oldest event(s) during token stream (cap=${MAX_EVENTS_PER_SLICE})`);
               slice.events.splice(0, dropped);
+              this.rebuildEventIdIndex(slice);
             }
           }
         }
@@ -549,19 +561,6 @@ export class WebviewBridge {
             });
           }
         }
-        break;
-      }
-
-      case 'commentary': {
-        slice.consecutiveToolRounds = 0;
-        this.appendEvent(agentId, {
-          id: `narrative-${Date.now()}-${rand()}`,
-          role: 'narrative',
-          content: event.text,
-          iteration: 0,
-          totalToolCalls: 0,
-          timestamp: now(),
-        });
         break;
       }
 

@@ -42,12 +42,12 @@ export type HostEvent =
   | { type: 'tool_start'; command: string; kwargs?: Record<string, unknown> }
   | { type: 'tool_complete'; command: string; result?: string; error?: string; durationMs?: number }
   | { type: 'tool_round'; narrative: string; iteration: number; totalToolCalls: number }
-  | { type: 'commentary'; text: string }
   | { type: 'turn_complete'; iterations?: number; toolCalls?: number; usage?: unknown }
   | { type: 'cost'; totalTokens: number; totalCost: number }
   | { type: 'permission_denied'; toolName: string; toolInput: string; reason: string }
   | { type: 'error'; message: string }
   | { type: 'doom_loop'; reason: string; command: string }
+  | { type: 'session_compacted'; summary: string; formattedSummary: string; removedMessageCount: number }
   | { type: 'initialized'; model: ModelInfo; triageModel?: ModelInfo }
   | { type: 'disposed' };
 
@@ -102,7 +102,7 @@ export class AgentHost {
   private listeners = new Set<HostEventListener>();
   private pendingInput: string | null = null;
 
-  // ── Commentary engine state ──
+  // ── Provider state ──
   public remoteProvider?: import('@sschepis/llm-wrapper').BaseProvider;
   public remoteModelName?: string;
   private _localProvider?: import('@sschepis/llm-wrapper').BaseProvider;
@@ -110,13 +110,23 @@ export class AgentHost {
 
   getLocalProvider() { return this._localProvider; }
   getLocalModelName() { return this._localModelName; }
+  getCompactionCount(): number { return this.compactionCount; }
+  getConversationRAG() { return this.agent?.getConversationRAG(); }
+  getSessionCompactor() { return this.agent?.getSessionCompactor(); }
 
   private toolLog: ToolSnapshot[] = [];
-  private consecutiveSilentRounds = 0;
-  private commentaryInFlight = false;
+  private targetFrequency = new Map<string, number>();
+  private editTargets = new Set<string>();
+  private readTargets = new Set<string>();
   private lastUserInput = '';
   private currentIteration = 0;
   private lastChaperoneIteration = 0;
+  private compactionCount = 0;
+  private triageFailCount = 0;
+  private triageCircuitOpen = false;
+  private triageCircuitOpenedAt = 0;
+  private static readonly TRIAGE_FAIL_THRESHOLD = 3;
+  private static readonly TRIAGE_CIRCUIT_COOLDOWN_MS = 120_000;
 
   constructor(config: AgentHostConfig) {
     this.id = config.id;
@@ -172,10 +182,20 @@ export class AgentHost {
       logger.info(`AgentHost "${this.id}": queued input while processing`);
       return;
     }
+    const newTriageModel = this.computeTriageModel();
+    const triageChanged = (!!newTriageModel) !== (!!this.triageModel);
+    if (triageChanged) {
+      this.triageModel = newTriageModel;
+      const session = this.agent.getSession();
+      this.teardownAgent();
+      await this.createAgent(session);
+    }
     this.lastUserInput = text;
     this.toolLog = [];
-    this.consecutiveSilentRounds = 0;
-    await this.agent.submitInput(text);
+    this.targetFrequency.clear();
+    this.editTargets.clear();
+    this.readTargets.clear();
+    await this.agent!.submitInput(text);
   }
 
   async interrupt(): Promise<void> {
@@ -297,7 +317,7 @@ export class AgentHost {
         addToAllowList: (cmd: string) => basePolicy.addToAllowList(cmd),
         requiredModeFor: (cmd: string) => basePolicy.requiredModeFor(cmd),
         authorize: async (toolName: string, toolInput: any) => {
-          if (this.currentIteration - this.lastChaperoneIteration >= this.settings.maxIterations) {
+          if (this.currentIteration - this.lastChaperoneIteration >= this.settings.maxIterations * 2) {
             this.emit({ type: 'phase', phase: 'chaperone', message: 'Chaperone is evaluating progress...' });
             const chaperoneResult = await this.invokeChaperone();
             this.lastChaperoneIteration = this.currentIteration;
@@ -334,8 +354,9 @@ export class AgentHost {
 
       this.wireEvents();
 
-      // Setup Aleph P2P Mesh Sync
-      this.meshSync = new AlephMeshSync((this.agent as any).bus);
+      if (process.env.ALEPH_MESH_URL) {
+        this.meshSync = new AlephMeshSync((this.agent as any).bus);
+      }
 
       this.activeModel = { ...this.activeModel, ready: true };
       if (this.triageModel) this.triageModel = { ...this.triageModel, ready: true };
@@ -359,7 +380,9 @@ export class AgentHost {
     const SPINNER_PHASES = new Set(['thinking', 'tools', 'planning', 'precheck', 'continuation', 'memory', 'chaperone']);
     a.on('phase', (e) => {
       const p = e.payload as { phase: string; message: string };
-      const message = SPINNER_PHASES.has(p.phase) ? getSpinnerMessage() : p.message;
+      const message = SPINNER_PHASES.has(p.phase)
+        ? (this.settings.fancySpinner ? getSpinnerMessage() : '')
+        : p.message;
       this.emit({ type: 'phase', phase: p.phase, message });
     });
 
@@ -371,7 +394,6 @@ export class AgentHost {
     a.on('agent_thought', (e) => {
       const p = e.payload as { text: string; model?: string; iteration?: number };
       if (!p?.text) return;
-      this.consecutiveSilentRounds = 0;
       this.emit({ type: 'thought', text: p.text, model: p.model, iteration: p.iteration });
     });
 
@@ -386,13 +408,23 @@ export class AgentHost {
 
     a.on('tool_execution_complete', (e) => {
       const p = e.payload as { command: string; result?: string; error?: string; durationMs?: number; kwargs?: Record<string, unknown> };
+      const target = this.extractTarget(p.kwargs);
       this.toolLog.push({
         command: String(p.command),
-        target: this.extractTarget(p.kwargs),
+        target,
         result: (p.result || p.error || '').slice(0, 200),
         success: !p.error,
       });
       if (this.toolLog.length > 12) this.toolLog.shift();
+      if (target) {
+        this.targetFrequency.set(target, (this.targetFrequency.get(target) ?? 0) + 1);
+        const cmd = String(p.command).toLowerCase();
+        if (cmd.includes('write') || cmd.includes('edit') || cmd.includes('patch')) {
+          this.editTargets.add(target);
+        } else if (cmd.includes('read') || cmd.includes('cat') || cmd.includes('view')) {
+          this.readTargets.add(target);
+        }
+      }
       this.emit({
         type: 'tool_complete',
         command: String(p.command),
@@ -404,7 +436,6 @@ export class AgentHost {
 
     a.on('tool_round_complete', (e) => {
       const p = e.payload as { narrative: string; iteration: number; totalToolCalls: number };
-      this.consecutiveSilentRounds++;
       this.currentIteration = p.iteration;
       this.emit({
         type: 'tool_round',
@@ -412,9 +443,6 @@ export class AgentHost {
         iteration: p.iteration,
         totalToolCalls: p.totalToolCalls,
       });
-      if (this.consecutiveSilentRounds >= 2 && !this.commentaryInFlight) {
-        this.requestCommentary(p.iteration, p.totalToolCalls);
-      }
     });
 
     a.on('turn_complete', (e) => {
@@ -450,6 +478,25 @@ export class AgentHost {
     a.on('error', (e) => {
       const p = e.payload as { message: string };
       const raw = p?.message ?? 'Unknown error';
+
+      if (this.isTriageError(raw)) {
+        this.triageFailCount++;
+        if (this.triageFailCount >= AgentHost.TRIAGE_FAIL_THRESHOLD && !this.triageCircuitOpen) {
+          this.triageCircuitOpen = true;
+          this.triageCircuitOpenedAt = Date.now();
+          logger.warn(`AgentHost "${this.id}": triage circuit breaker OPEN after ${this.triageFailCount} failures`);
+          this.emit({
+            type: 'error',
+            message: `Triage model unreachable after ${this.triageFailCount} attempts. ` +
+              `Requests will bypass triage and go directly to the executor for the next 2 minutes. ` +
+              `Please retry your last message.`,
+          });
+          return;
+        }
+      } else {
+        this.triageFailCount = 0;
+      }
+
       this.emit({ type: 'error', message: this.decorateRuntimeError(raw) });
       if (this.pendingInput) {
         const lost = this.pendingInput;
@@ -462,6 +509,18 @@ export class AgentHost {
     a.on('doom_loop', (e) => {
       const p = e.payload as { reason: string; command: string };
       this.emit({ type: 'doom_loop', reason: p.reason, command: p.command });
+    });
+
+    a.on('session_compacted', (e) => {
+      const p = e.payload as { summary: string; formattedSummary: string; removedMessageCount: number };
+      this.compactionCount++;
+      logger.info(`AgentHost "${this.id}": session compacted (#${this.compactionCount}), removed ${p.removedMessageCount} messages`);
+      this.emit({
+        type: 'session_compacted',
+        summary: p.summary,
+        formattedSummary: p.formattedSummary,
+        removedMessageCount: p.removedMessageCount,
+      });
     });
   }
 
@@ -478,31 +537,94 @@ export class AgentHost {
 
   // ── Chaperone engine ─────────────────────────────────────────────────
 
+  private computeProgressSignals(): { repeatedTargets: string[]; uniqueTargets: number; editCount: number; readWriteOverlap: string[] } {
+    const repeated: string[] = [];
+    for (const [target, count] of this.targetFrequency) {
+      if (count >= 3) repeated.push(`${target} (${count}x)`);
+    }
+    const readWriteOverlap = [...this.editTargets].filter(t => this.readTargets.has(t));
+    return {
+      repeatedTargets: repeated,
+      uniqueTargets: this.targetFrequency.size,
+      editCount: this.editTargets.size,
+      readWriteOverlap,
+    };
+  }
+
   private async invokeChaperone(): Promise<'continue' | 'abort'> {
+    for (const [target, count] of this.targetFrequency) {
+      if (count >= 8) {
+        logger.warn(`AgentHost "${this.id}": Chaperone fast-abort — target "${target}" accessed ${count} times`);
+        this.emit({
+          type: 'doom_loop',
+          reason: `Target "${target}" accessed ${count} times — likely stuck in a loop`,
+          command: 'chaperone:fast-abort',
+        });
+        return 'abort';
+      }
+    }
+
     if (!this.remoteProvider || !this.remoteModelName) return 'continue';
     const provider = this.remoteProvider;
     const model = this.remoteModelName;
 
-    const recentLog = this.toolLog.map(t => `- [${t.success ? 'OK' : 'ERR'}] ${t.command} (${t.target})`).join('\n');
-    const prompt = `The primary agent has been running for ${this.currentIteration} iterations.
-Recent tool calls:
+    const recentLog = this.toolLog.map(t =>
+      `- [${t.success ? 'OK' : 'ERR'}] ${t.command} → ${t.target || '(no target)'} | ${t.result.slice(0, 80)}`
+    ).join('\n');
+
+    const signals = this.computeProgressSignals();
+    const compactionNote = this.compactionCount > 0
+      ? `\nNote: Session compacted ${this.compactionCount} time(s). Shorter history does NOT indicate lack of progress.\n`
+      : '';
+
+    let warningBlock = '';
+    if (signals.repeatedTargets.length > 0) {
+      warningBlock += `\nREPEATED TARGETS (3+ accesses): ${signals.repeatedTargets.join(', ')}`;
+    }
+    if (signals.readWriteOverlap.length > 0) {
+      warningBlock += `\nREAD-AFTER-WRITE on: ${signals.readWriteOverlap.join(', ')} — may indicate edit/revert cycles`;
+    }
+
+    const prompt = `You are a chaperone evaluating whether an AI agent is making genuine progress.
+
+User's original request: "${this.lastUserInput.slice(0, 300)}"
+
+The agent has been running for ${this.currentIteration} iterations.
+${compactionNote}
+Progress metrics:
+- Unique targets touched: ${signals.uniqueTargets}
+- Files edited: ${signals.editCount}
+${warningBlock}
+
+Recent tool calls (last ${this.toolLog.length}):
 ${recentLog}
 
-Evaluate if the agent is making productive progress or if it is stuck in a non-productive loop/repeating errors.
-Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "..."}`;
+Evaluate:
+1. Is the agent making FORWARD progress toward the user's goal?
+2. Are there signs of a doom loop (same targets read repeatedly, edits that revert, repeated errors)?
+3. Is the ratio of unique productive actions to total actions reasonable?
+
+Respond ONLY with JSON: {"status": "continue" | "abort", "reasoning": "..."}`;
 
     try {
-      const res = await provider.chat({
+      const CHAPERONE_TIMEOUT_MS = 10_000;
+      const chatPromise = provider.chat({
         model,
         messages: [{ role: 'user' as const, content: prompt }],
-        max_tokens: 500
+        max_tokens: 200,
       });
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), CHAPERONE_TIMEOUT_MS));
+      const res = await Promise.race([chatPromise, timeoutPromise]);
+      if (!res) {
+        logger.warn(`AgentHost "${this.id}": Chaperone timed out after ${CHAPERONE_TIMEOUT_MS}ms`);
+        return 'continue';
+      }
       const content = (res?.choices?.[0]?.message?.content as string)?.trim() || '';
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.status === 'abort') {
-          logger.warn(`AgentHost "${this.id}": Chaperone aborted loop. Reason: ${parsed.reasoning}`);
+          logger.warn(`AgentHost "${this.id}": Chaperone aborted. Reason: ${parsed.reasoning}`);
           return 'abort';
         }
       }
@@ -511,54 +633,6 @@ Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "
       logger.error(`AgentHost "${this.id}": Chaperone failed`, err);
       return 'continue';
     }
-  }
-
-  // ── Commentary engine ─────────────────────────────────────────────────
-
-  private requestCommentary(iteration: number, totalToolCalls: number): void {
-    if (!this._localProvider || !this._localModelName) return;
-    this.commentaryInFlight = true;
-    const frame = this.buildStateFrame(iteration, totalToolCalls);
-    const provider = this._localProvider;
-    const model = this._localModelName;
-
-    provider.chat({
-      model,
-      messages: [
-        {
-          role: 'system' as const,
-          content: 'You are an AI coding assistant narrating your own work in first person. Given a state frame, write ONE concise sentence in first person (starting with "I am" or "I\'m") explaining what you are doing and why. Name specific files, functions, or patterns. Do not describe tools — describe the work. No preamble.',
-        },
-        { role: 'user' as const, content: frame },
-      ],
-      max_tokens: 250,
-    }).then((res) => {
-      this.commentaryInFlight = false;
-      let text = (res?.choices?.[0]?.message?.content as string)?.trim();
-      if (text && !/[.!?)]$/.test(text)) {
-        const lastSentence = text.lastIndexOf('. ');
-        text = lastSentence > 0 ? text.slice(0, lastSentence + 1) : '';
-      }
-      if (text && this.isProcessing) {
-        this.consecutiveSilentRounds = 0;
-        this.emit({ type: 'commentary', text });
-      }
-    }).catch((err) => {
-      this.commentaryInFlight = false;
-      logger.debug(`AgentHost "${this.id}": commentary failed`, err);
-    });
-  }
-
-  private buildStateFrame(iteration: number, totalToolCalls: number): string {
-    const lines: string[] = [];
-    lines.push(`User request: ${this.lastUserInput.slice(0, 300)}`);
-    lines.push(`Iteration: ${iteration}, Total tool calls: ${totalToolCalls}`);
-    lines.push('Recent activity:');
-    for (const t of this.toolLog) {
-      const status = t.success ? 'ok' : 'ERROR';
-      lines.push(`  ${t.command}${t.target ? ' ' + t.target : ''} [${status}] → ${t.result.slice(0, 100)}`);
-    }
-    return lines.join('\n');
   }
 
   private extractTarget(kwargs?: Record<string, unknown>): string {
@@ -620,6 +694,14 @@ Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "
 
   private computeTriageModel(): ModelInfo | undefined {
     if (!this.settings.triageEnabled) return undefined;
+    if (this.triageCircuitOpen) {
+      if (Date.now() - this.triageCircuitOpenedAt < AgentHost.TRIAGE_CIRCUIT_COOLDOWN_MS) {
+        return undefined;
+      }
+      this.triageCircuitOpen = false;
+      this.triageFailCount = 0;
+      logger.info(`AgentHost "${this.id}": triage circuit breaker half-open — allowing retry`);
+    }
     try {
       const resolved = resolveRole('triage', this.settings);
       const providerMeta = getProviderMeta(resolved.providerType);
@@ -650,6 +732,14 @@ Respond ONLY with a JSON object: {"status": "continue" | "abort", "reasoning": "
         "\n\nCan't reach the server. Check that the base URL is correct and the service is running.";
     }
     return `Failed to initialize agent: ${raw}${hint}`;
+  }
+
+  private isTriageError(msg: string): boolean {
+    return /Compilation failed for "triage"/i.test(msg)
+      || /triage.*ECONNREFUSED/i.test(msg)
+      || /triage.*fetch failed/i.test(msg)
+      || /triage.*timeout/i.test(msg)
+      || /triage.*unreachable/i.test(msg);
   }
 
   private decorateRuntimeError(raw: string): string {

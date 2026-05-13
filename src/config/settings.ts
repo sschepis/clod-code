@@ -34,6 +34,8 @@ export interface ObotovsSettings {
   uiControlEnabled: boolean;
   peerDispatchEnabled: boolean;
   subconsciousEnabled: boolean;
+  conversationRagEnabled: boolean;
+  fancySpinner: boolean;
   shell: string;
   openclaw?: { mode: 'managed' | 'connected'; url: string; };
 }
@@ -49,7 +51,7 @@ export function getSettings(): ObotovsSettings {
   return {
     providers: cfg.get<Record<string, ProviderConfig>>('providers', {}),
     routing: cfg.get<Partial<Record<PromptRole, RouteAssignment>>>('routing', DEFAULT_ROUTING),
-    triageEnabled: cfg.get<boolean>('triageEnabled', true),
+    triageEnabled: cfg.get<boolean>('triageEnabled', false),
     permissionMode: cfg.get<ObotovsSettings['permissionMode']>('permissionMode', 'prompt'),
     maxIterations: cfg.get<number>('maxIterations', 50),
     maxContextTokens: cfg.get<number>('maxContextTokens', 128_000),
@@ -64,6 +66,8 @@ export function getSettings(): ObotovsSettings {
     uiControlEnabled: cfg.get<boolean>('uiControlEnabled', false),
     peerDispatchEnabled: cfg.get<boolean>('peerDispatchEnabled', true),
     subconsciousEnabled: cfg.get<boolean>('subconsciousEnabled', false),
+    conversationRagEnabled: cfg.get<boolean>('conversationRagEnabled', false),
+    fancySpinner: cfg.get<boolean>('fancySpinner', true),
     shell: cfg.get<string>('shell', ''),
     openclaw: cfg.get<ObotovsSettings['openclaw']>('openclaw'),
   };

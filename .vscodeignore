@@ -20,6 +20,12 @@ tsconfig.json
 in.code
 *.vsix
 package-lock.json
+stats.gun-data
+test-gemini-fetch.js
+test-gemini.ts
+scripts/**
+.github/**
+.thothalpha/**
 
 # Include all of node_modules (runtime deps). dev-only dirs are
 # excluded below. This is safer than trying to whitelist every

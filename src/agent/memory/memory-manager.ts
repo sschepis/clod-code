@@ -16,6 +16,9 @@ export class MemoryManager {
   private readonly projectPath: string;
   private flushTimer?: NodeJS.Timeout;
   private changeListeners = new Set<() => void>();
+  private promotionCounts = new Map<string, { count: number; windowStart: number }>();
+  private static readonly MAX_PROMOTIONS_PER_WINDOW = 10;
+  private static readonly PROMOTION_WINDOW_MS = 60_000;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.global = new MemoryField('global');
@@ -89,6 +92,19 @@ export class MemoryManager {
   }
 
   promote(agentId: string, entryId: string, to: 'project' | 'global'): MemoryEntry | undefined {
+    const now = Date.now();
+    const bucket = this.promotionCounts.get(agentId) ?? { count: 0, windowStart: now };
+    if (now - bucket.windowStart > MemoryManager.PROMOTION_WINDOW_MS) {
+      bucket.count = 0;
+      bucket.windowStart = now;
+    }
+    if (bucket.count >= MemoryManager.MAX_PROMOTIONS_PER_WINDOW) {
+      logger.warn(`Memory promotion rate limit hit for agent ${agentId}`);
+      return undefined;
+    }
+    bucket.count++;
+    this.promotionCounts.set(agentId, bucket);
+
     const source = this.findContaining(agentId, entryId);
     if (!source) return undefined;
     const entry = source.field.get(entryId);

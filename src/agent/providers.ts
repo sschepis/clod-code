@@ -152,6 +152,42 @@ function resolveProviderApiKey(config: ProviderConfig): string {
   return '';
 }
 
+const providerCache = new Map<string, BaseProvider>();
+
+function buildProviderCacheKey(
+  providerId: string,
+  model: string,
+  settings: ObotovsSettings,
+): string {
+  const config = settings.providers[providerId];
+  if (!config) return `${providerId}:${model}`;
+  return `${providerId}:${model}:${config.type}:${config.apiKey ?? ''}:${config.baseUrl ?? ''}`;
+}
+
+export function clearProviderCache(): void {
+  providerCache.clear();
+}
+
+async function getOrBuildProvider(
+  providerId: string,
+  model: string,
+  settings: ObotovsSettings,
+): Promise<BaseProvider> {
+  if (providerId === MANAGED_PROVIDER_ID) {
+    return buildProvider(providerId, model, settings);
+  }
+  const config = settings.providers[providerId];
+  if (config?.type === 'vscode-lm') {
+    return buildProvider(providerId, model, settings);
+  }
+  const key = buildProviderCacheKey(providerId, model, settings);
+  const cached = providerCache.get(key);
+  if (cached) return cached;
+  const provider = await buildProvider(providerId, model, settings);
+  providerCache.set(key, provider);
+  return provider;
+}
+
 export async function createProviders(
   settings: ObotovsSettings,
   role?: PromptRole,
@@ -164,8 +200,21 @@ export async function createProviders(
     executor: `${execResolved.providerId}/${execResolved.model}`,
   });
 
-  const local = await buildProvider(triageResolved.providerId, triageResolved.model, settings);
-  const remote = await buildProvider(execResolved.providerId, execResolved.model, settings);
+  const sameProvider = triageResolved.providerId === execResolved.providerId
+    && triageResolved.model === execResolved.model;
+
+  let local: BaseProvider;
+  let remote: BaseProvider;
+
+  if (sameProvider) {
+    remote = await getOrBuildProvider(execResolved.providerId, execResolved.model, settings);
+    local = remote;
+  } else {
+    [local, remote] = await Promise.all([
+      getOrBuildProvider(triageResolved.providerId, triageResolved.model, settings),
+      getOrBuildProvider(execResolved.providerId, execResolved.model, settings),
+    ]);
+  }
 
   return {
     local,

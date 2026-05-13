@@ -1,4 +1,18 @@
 import type { BaseProvider, StandardChatParams, StandardChatResponse } from '@sschepis/llm-wrapper';
+import { logger } from '../shared/logger';
+
+const NATIVE_TOOL_MAP: Record<string, string> = {
+  code_explore: 'code/explore',
+  file_read: 'file/read',
+  file_edit: 'file/edit',
+  search_grep: 'search/grep',
+  shell_run: 'shell/run',
+};
+
+const REVERSE_MAP: Record<string, string> = {};
+for (const [native, slashed] of Object.entries(NATIVE_TOOL_MAP)) {
+  REVERSE_MAP[slashed] = native;
+}
 
 const NATIVE_CORE_TOOLS = [
   {
@@ -90,10 +104,99 @@ const NATIVE_CORE_TOOLS = [
 
 function injectNativeTools(params: StandardChatParams): StandardChatParams {
   if (!params.tools) return params;
-  // Make a shallow copy of params and tools array
   const newParams = { ...params };
   newParams.tools = [...params.tools, ...NATIVE_CORE_TOOLS];
   return newParams;
+}
+
+/**
+ * Rewrite tool calls from native names (code_explore, file_read, etc.)
+ * into the terminal_interface command/kwargs format that oboto-agent's
+ * swiss-army-tool router expects — but KEEP the original native name
+ * on `tc.function.name` so that the Gemini conversation history stays
+ * consistent with the function declarations.
+ */
+function rewriteToolCallForDispatch(tc: any): any {
+  if (tc.type !== 'function' || !tc.function) return tc;
+  const name = tc.function.name;
+  const command = NATIVE_TOOL_MAP[name] || name.replace(/_/g, '/');
+
+  if (name !== 'terminal_interface' && name in NATIVE_TOOL_MAP) {
+    let argsObj = {};
+    try { argsObj = JSON.parse(tc.function.arguments || '{}'); } catch {}
+    tc.function.arguments = JSON.stringify({ command, kwargs: argsObj });
+    // Keep tc.function.name as the native name — Gemini needs it to match
+    // the function declarations. oboto-agent reads `command` from the
+    // parsed arguments via normalizeToolArgs.
+    tc.function.name = 'terminal_interface';
+  } else if (name === 'terminal_interface') {
+    try {
+      const argsObj = JSON.parse(tc.function.arguments || '{}');
+      if (!argsObj.command && argsObj.kwargs === undefined) {
+        tc.function.arguments = JSON.stringify({
+          command: '_error_missing_command',
+          kwargs: argsObj
+        });
+      }
+    } catch {}
+  }
+  return tc;
+}
+
+/**
+ * Before sending messages to the LLM, restore native tool names in any
+ * previous assistant messages whose tool_calls were rewritten to
+ * terminal_interface. This keeps the function declarations and the
+ * conversation history in sync for the Gemini API.
+ */
+function restoreNativeNamesInHistory(params: StandardChatParams): StandardChatParams {
+  if (!params.messages) return params;
+
+  const newMessages = params.messages.map((msg: any) => {
+    if (msg.role !== 'assistant' || !msg.tool_calls) return msg;
+    const newToolCalls = msg.tool_calls.map((tc: any) => {
+      if (tc.function?.name !== 'terminal_interface') return tc;
+      try {
+        const args = JSON.parse(tc.function.arguments || '{}');
+        const command = args.command;
+        const nativeName = REVERSE_MAP[command];
+        if (nativeName) {
+          return {
+            ...tc,
+            function: {
+              ...tc.function,
+              name: nativeName,
+              arguments: JSON.stringify(args.kwargs || {})
+            }
+          };
+        }
+      } catch {}
+      return tc;
+    });
+    return { ...msg, tool_calls: newToolCalls };
+  });
+
+  // Also fix tool result messages: their `name` must match the
+  // assistant's tool call name.
+  const tcNameById = new Map<string, string>();
+  for (const msg of newMessages) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        tcNameById.set(tc.id, tc.function.name);
+      }
+    }
+  }
+
+  const finalMessages = newMessages.map((msg: any) => {
+    if (msg.role !== 'tool') return msg;
+    const correctName = tcNameById.get(msg.tool_call_id);
+    if (correctName && msg.name !== correctName) {
+      return { ...msg, name: correctName };
+    }
+    return msg;
+  });
+
+  return { ...params, messages: finalMessages };
 }
 
 export function createDWIMProvider(provider: BaseProvider): BaseProvider {
@@ -101,17 +204,77 @@ export function createDWIMProvider(provider: BaseProvider): BaseProvider {
     get(target, prop, receiver) {
       if (prop === 'chat') {
         return async function (params: StandardChatParams): Promise<StandardChatResponse> {
-          const injectedParams = injectNativeTools(params);
-          const response = await target.chat(injectedParams);
+          const prepared = restoreNativeNamesInHistory(injectNativeTools(params));
+          const response = await target.chat(prepared);
           return interceptResponse(response);
         };
       }
       if (prop === 'stream') {
         return async function* (params: StandardChatParams) {
-          const injectedParams = injectNativeTools(params);
-          const stream = await target.stream(injectedParams);
+          const prepared = restoreNativeNamesInHistory(injectNativeTools(params));
+          const stream = target.stream(prepared);
+          // Accumulate tool call fragments so we can rewrite the complete
+          // tool calls for dispatch while streaming text through immediately.
+          const toolCallAccum = new Map<number, { id: string; name: string; args: string }>();
+          let hasNativeToolCalls = false;
+          let lastId = '';
+          let lastCreated = 0;
+          let lastModel = '';
           for await (const chunk of stream) {
-            yield interceptChunk(chunk);
+            if (!lastId && chunk.id) lastId = chunk.id;
+            if (!lastModel && chunk.model) lastModel = chunk.model;
+            if (!lastCreated && chunk.created) lastCreated = chunk.created;
+            const delta = chunk.choices?.[0]?.delta;
+            if (delta?.content) {
+              yield chunk;
+            }
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const existing = toolCallAccum.get(tc.index);
+                if (existing) {
+                  if (tc.function?.name) existing.name = tc.function.name;
+                  if (tc.function?.arguments) existing.args += tc.function.arguments;
+                } else {
+                  toolCallAccum.set(tc.index, {
+                    id: tc.id ?? '',
+                    name: tc.function?.name ?? '',
+                    args: tc.function?.arguments ?? '',
+                  });
+                }
+                if (tc.function?.name && tc.function.name in NATIVE_TOOL_MAP) {
+                  hasNativeToolCalls = true;
+                }
+              }
+              if (!hasNativeToolCalls) {
+                yield chunk;
+              }
+            }
+            if (!delta?.content && !delta?.tool_calls) {
+              yield chunk;
+            }
+          }
+          // Emit fully assembled and rewritten tool calls for dispatch
+          if (hasNativeToolCalls && toolCallAccum.size > 0) {
+            const rewrittenToolCalls: any[] = [];
+            for (const [index, tc] of [...toolCallAccum.entries()].sort((a, b) => a[0] - b[0])) {
+              rewrittenToolCalls.push(rewriteToolCallForDispatch({
+                id: tc.id,
+                index,
+                type: 'function' as const,
+                function: { name: tc.name, arguments: tc.args },
+              }));
+            }
+            yield {
+              id: lastId,
+              object: 'chat.completion.chunk',
+              created: lastCreated,
+              model: lastModel,
+              choices: [{
+                index: 0,
+                delta: { tool_calls: rewrittenToolCalls },
+                finish_reason: 'tool_calls'
+              }]
+            };
           }
         };
       }
@@ -124,81 +287,8 @@ function interceptResponse(response: StandardChatResponse): StandardChatResponse
   if (!response.choices) return response;
   for (const choice of response.choices) {
     if (choice.message?.tool_calls) {
-      choice.message.tool_calls = choice.message.tool_calls.map(transformToolCall);
+      choice.message.tool_calls = choice.message.tool_calls.map(rewriteToolCallForDispatch);
     }
   }
   return response;
-}
-
-function interceptChunk(chunk: any): any {
-  if (!chunk.choices) return chunk;
-  for (const choice of chunk.choices) {
-    if (choice.delta?.tool_calls) {
-      choice.delta.tool_calls = choice.delta.tool_calls.map(transformDeltaToolCall);
-    }
-  }
-  return chunk;
-}
-
-function transformToolCall(tc: any): any {
-  if (tc.type !== 'function' || !tc.function) return tc;
-  const name = tc.function.name;
-  
-  if (name !== 'terminal_interface') {
-    // Muscle memory catch: LLM hallucinates native tool name (e.g. file/edit or file_edit)
-    const normalizedName = name.replace(/_/g, '/');
-    let argsObj = {};
-    try {
-      argsObj = JSON.parse(tc.function.arguments || '{}');
-    } catch (e) {}
-
-    tc.function.name = 'terminal_interface';
-    tc.function.arguments = JSON.stringify({
-      command: normalizedName,
-      kwargs: argsObj
-    });
-  } else {
-    // Muscle memory catch: LLM calls terminal_interface but forgets 'command' or puts args at root
-    try {
-      const argsObj = JSON.parse(tc.function.arguments || '{}');
-      if (!argsObj.command) {
-        // Find if there is a command hidden in the args keys
-        const command = argsObj.command || argsObj.action || argsObj.module || '';
-        if (!command && Object.keys(argsObj).length > 0 && !argsObj.kwargs) {
-          // If no command but there are args, this is a malformed tool call. 
-          // We can't safely guess the command, but we could try to see if it matches a known command or something.
-          // Wait, if there's no command, and no action, maybe we just wrap it into a failed command to throw an error?
-          // Actually, if kwargs is missing, we can wrap the root args into kwargs.
-        }
-        
-        if (!argsObj.command && argsObj.kwargs === undefined) {
-           // We'll let it fail, but we'll ensure it fails loudly by injecting a non-empty string or something?
-           // The backend defaults to root menu if command is missing.
-           // To trigger an error, we can set command to "_error_missing_command".
-           tc.function.arguments = JSON.stringify({
-             command: '_error_missing_command',
-             kwargs: argsObj
-           });
-        }
-      }
-    } catch(e) {}
-  }
-  
-  return tc;
-}
-
-function transformDeltaToolCall(tc: any): any {
-  // Delta tool calls stream the name first, then arguments piece by piece.
-  // It is very hard to rewrite delta arguments on the fly because they are streaming JSON chunks.
-  // However, oboto-agent buffers the stream internally before executing!
-  // Wait, does oboto-agent execute off the stream directly? Yes, when the tool_call finish reason arrives.
-  // It aggregates chunks via \`aggregateStream\`.
-  // So we ONLY need to rewrite the name if it arrives, but wait... if we rewrite the name, we also need to rewrite the arguments JSON string stream. 
-  // Rewriting a streaming JSON string from \`{"path": "foo"}\` to \`{"command":"file/write", "kwargs": {"path": "foo"}}\` is practically impossible without buffering.
-  // We can just buffer the entire tool call and emit it at the end!
-  // But wait! If we just buffer, it breaks streaming.
-  
-  // Actually, we can just replace `providers.local` with the wrapped provider in `AgentHost`. 
-  // Let's check how ObotoAgent handles streaming.
-  return tc;
 }

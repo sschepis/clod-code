@@ -8,6 +8,13 @@ import type { ProjectManager } from '../projects/project-manager';
 const MAX_INSTRUCTION_FILE_CHARS = 4000;
 const MAX_TOTAL_INSTRUCTION_CHARS = 12000;
 
+const INSTRUCTION_CACHE_TTL_MS = 30_000;
+let instructionCache: { key: string; content: string | null; timestamp: number } | null = null;
+
+export function invalidateSystemPromptCache(): void {
+  instructionCache = null;
+}
+
 export interface BuildSystemPromptOptions {
   instructionFileName: string;
   /** Optional — when provided, the available-skills section is appended. */
@@ -68,32 +75,56 @@ function discoverInstructionFiles(fileName: string): string | null {
   const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!rootPath) return null;
 
-  const files: string[] = [];
-  let totalChars = 0;
-  let currentDir = rootPath;
-
-  // Walk from workspace root upward to find instruction files
-  while (true) {
-    const filePath = path.join(currentDir, fileName);
-    if (fs.existsSync(filePath)) {
-      try {
-        let content = fs.readFileSync(filePath, 'utf-8');
-        if (content.length > MAX_INSTRUCTION_FILE_CHARS) {
-          content = content.slice(0, MAX_INSTRUCTION_FILE_CHARS) + '\n\n[... truncated]';
-        }
-        if (totalChars + content.length <= MAX_TOTAL_INSTRUCTION_CHARS) {
-          files.push(`### ${path.relative(rootPath, filePath) || fileName}\n${content}`);
-          totalChars += content.length;
-        }
-      } catch {
-        // Ignore unreadable files
-      }
-    }
-
-    const parent = path.dirname(currentDir);
-    if (parent === currentDir) break; // Reached filesystem root
-    currentDir = parent;
+  const cacheKey = `${rootPath}:${fileName}`;
+  if (instructionCache && instructionCache.key === cacheKey &&
+      Date.now() - instructionCache.timestamp < INSTRUCTION_CACHE_TTL_MS) {
+    return instructionCache.content;
   }
 
-  return files.length > 0 ? files.join('\n\n') : null;
+  const files: string[] = [];
+  let totalChars = 0;
+
+  // Check workspace root first
+  const rootFile = path.join(rootPath, fileName);
+  if (fs.existsSync(rootFile)) {
+    try {
+      let content = fs.readFileSync(rootFile, 'utf-8');
+      if (content.length > MAX_INSTRUCTION_FILE_CHARS) {
+        content = content.slice(0, MAX_INSTRUCTION_FILE_CHARS) + '\n\n[... truncated]';
+      }
+      files.push(`### ${fileName}\n${content}`);
+      totalChars += content.length;
+    } catch { /* ignore */ }
+  }
+
+  // Walk into subdirectories (breadth-first, max 3 levels deep)
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: rootPath, depth: 0 }];
+  while (queue.length > 0 && totalChars < MAX_TOTAL_INSTRUCTION_CHARS) {
+    const { dir, depth } = queue.shift()!;
+    if (depth > 3) continue;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push({ dir: fullPath, depth: depth + 1 });
+      } else if (entry.isFile() && entry.name === fileName && fullPath !== rootFile) {
+        try {
+          let content = fs.readFileSync(fullPath, 'utf-8');
+          if (content.length > MAX_INSTRUCTION_FILE_CHARS) {
+            content = content.slice(0, MAX_INSTRUCTION_FILE_CHARS) + '\n\n[... truncated]';
+          }
+          if (totalChars + content.length <= MAX_TOTAL_INSTRUCTION_CHARS) {
+            files.push(`### ${path.relative(rootPath, fullPath)}\n${content}`);
+            totalChars += content.length;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  const result = files.length > 0 ? files.join('\n\n') : null;
+  instructionCache = { key: cacheKey, content: result, timestamp: Date.now() };
+  return result;
 }

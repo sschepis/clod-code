@@ -134,6 +134,8 @@ export interface ToolTreeDeps {
   peer: PeerToolDeps;
   /** Hierarchical memory (conversation/project/global). Optional for tests. */
   memory?: MemoryToolDeps;
+  /** ConversationRAG — semantic retrieval over full conversation history including compacted portions. */
+  rag?: { getRag: () => any };
   /** Chat title control — lets the agent rename its conversation window. */
   chatTitle?: ChatTitleDeps;
   /** Shell configuration — which shell binary to use for commands. */
@@ -1623,6 +1625,26 @@ export function buildToolTree(deps: ToolTreeDeps): ToolTreeResult {
       requiredArgs: { id: { type: 'string', description: 'Entry id to remove' } },
       handler: createMemoryForgetHandler(m),
     }));
+    if (deps.rag) {
+      const ragDeps = deps.rag;
+      memBranch.addChild(new LeafNode({
+        name: 'context',
+        description:
+          'Retrieve relevant past conversation context using semantic search over the full conversation history, including portions that were compacted. Use when you need to recall earlier discussions or tool results that may have been pruned from the active context window.',
+        requiredArgs: {
+          query: { type: 'string', description: 'What past context to search for' },
+        },
+        handler: async (kwargs: Record<string, unknown>) => {
+          const query = typeof kwargs.query === 'string' ? kwargs.query.trim() : '';
+          if (!query) return '[ERROR] Missing required argument: query';
+          const rag = ragDeps.getRag();
+          if (!rag) return '[INFO] ConversationRAG is not enabled. Enable it in settings (conversationRagEnabled).';
+          const result = await rag.retrieve(query);
+          if (result.results.length === 0) return `[SUCCESS] No relevant past context found for "${query}".`;
+          return `[SUCCESS] Retrieved ${result.results.length} relevant context chunk(s):\n${result.context}`;
+        },
+      }));
+    }
     root.addChild(memBranch);
   }
 

@@ -8,6 +8,7 @@ import type { MemoryManager, RecallScope } from '../agent/memory/memory-manager'
 export interface MemoryToolDeps {
   manager: MemoryManager;
   callerId: () => string;
+  isHumanSupervised: () => boolean;
 }
 
 const VALID_SCOPES = new Set(['conversation', 'project', 'global', 'all']);
@@ -27,7 +28,8 @@ export function createMemoryAddHandler(deps: MemoryToolDeps) {
       : typeof kwargs.tags === 'string'
         ? (kwargs.tags as string).split(',').map(t => t.trim()).filter(Boolean)
         : [];
-    const strength = typeof kwargs.strength === 'number' ? Math.max(0, Math.min(1, kwargs.strength)) : 0.7;
+    const rawStrength = typeof kwargs.strength === 'number' ? Math.max(0, Math.min(1, kwargs.strength)) : 0.4;
+    const strength = deps.isHumanSupervised() ? rawStrength : Math.min(rawStrength, 0.55);
 
     const entry = deps.manager.recordConversationEntry(deps.callerId(), { title, body, tags, strength });
     return `[SUCCESS] Saved to conversation memory. id=${entry.id}`;
@@ -59,6 +61,9 @@ export function createMemoryPromoteHandler(deps: MemoryToolDeps) {
     const to = kwargs.to === 'project' || kwargs.to === 'global' ? kwargs.to : null;
     if (!id) return '[ERROR] Missing required argument: id. Use the entry id from memory/recall or memory/list.';
     if (!to) return '[ERROR] Missing required argument: to. Must be "project" (persists across conversations in this workspace) or "global" (persists across all workspaces).';
+    if (to === 'global' && !deps.isHumanSupervised()) {
+      return '[ERROR] Background agents cannot promote entries to global scope. Use memory/add with appropriate tags and a foreground agent or human can promote later.';
+    }
 
     const promoted = deps.manager.promote(deps.callerId(), id, to);
     if (!promoted) return `[ERROR] No entry found with id=${id} in any scope reachable from this agent.`;

@@ -12,7 +12,7 @@
  */
 
 import type { Router, SessionManager } from '@sschepis/swiss-army-tool';
-import type { AgentRuntime } from '@sschepis/as-agent';
+import type { AgentRuntime, Session } from '@sschepis/as-agent';
 
 import type { ObotovsSettings, PromptRole } from '../config/settings';
 import type {
@@ -28,6 +28,7 @@ import { logger } from '../shared/logger';
 import { getErrorMessage } from '../shared/errors';
 import type { SkillManager } from '../skills/skill-manager';
 import type { ProjectManager } from '../projects/project-manager';
+import type { CrashJournalManager, CrashJournalEntry } from './crash-journal';
 
 export interface SpawnOpts {
   task: string;
@@ -70,6 +71,8 @@ export interface AgentManagerConfig {
   skills?: SkillManager;
   /** Optional — surfaced in spawned-agent system prompts for active project context. */
   projects?: ProjectManager;
+  /** Optional — crash journal manager for background agent crash recovery. */
+  crashJournal?: CrashJournalManager;
   /** Optional — invoked whenever agent summaries change (spawn, status, cost, etc.). */
   onSummariesChanged?: () => void;
   /**
@@ -114,6 +117,7 @@ export class AgentManager {
   private projects?: ProjectManager;
   private onSummariesChanged?: () => void;
   private onAgentSpawned?: AgentManagerConfig['onAgentSpawned'];
+  private crashJournal?: CrashJournalManager;
   private counter = 0;
 
   constructor(config: AgentManagerConfig) {
@@ -125,6 +129,7 @@ export class AgentManager {
     this.projects = config.projects;
     this.onSummariesChanged = config.onSummariesChanged;
     this.onAgentSpawned = config.onAgentSpawned;
+    this.crashJournal = config.crashJournal;
   }
 
   private notifySummariesChanged(): void {
@@ -385,6 +390,39 @@ export class AgentManager {
       logger.warn(`onAgentSpawned hook threw for "${agentId}"`, err);
     }
 
+    // Write crash journal before submitting (save-before-submit)
+    if (this.crashJournal) {
+      try {
+        await this.crashJournal.writeJournal({
+          agentId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          spawnOpts: {
+            task: opts.task,
+            systemPrompt: opts.systemPrompt,
+            model: opts.model,
+            budgetUsd,
+            timeoutMs,
+            permissionMode: opts.permissionMode,
+            parentId: opts.parentId,
+            label: opts.label,
+            batchId: opts.batchId,
+            role: opts.role,
+          },
+          phase: 'running',
+          inFlightTool: null,
+          budgetUsd,
+          spentUsd: 0,
+          spentByChildren: 0,
+          lineage: [...lineage],
+          parentId,
+          batchId: opts.batchId,
+        });
+      } catch (err) {
+        logger.warn(`Crash journal write failed for "${agentId}"`, err);
+      }
+    }
+
     // Initialize and submit task
     try {
       await host.initialize();
@@ -414,9 +452,125 @@ export class AgentManager {
     }
   }
 
+  // ── Resume (crash recovery) ─────────────────────────────────────────
+
+  async resumeAgent(
+    entry: CrashJournalEntry,
+    session: Session,
+  ): Promise<SpawnResult | SpawnFailure> {
+    const agentId = entry.agentId;
+    const opts = entry.spawnOpts;
+
+    const instanceSettings: ObotovsSettings = { ...this.settings };
+    if (opts.model?.provider || opts.model?.name) {
+      const currentExec = instanceSettings.routing?.executor;
+      instanceSettings.routing = {
+        ...instanceSettings.routing,
+        executor: {
+          providerId: opts.model?.provider ?? currentExec?.providerId ?? 'oboto',
+          model: opts.model?.name ?? currentExec?.model,
+        },
+      };
+    }
+
+    const { router } = this.toolTreeFactory(agentId);
+    const host = new AgentHost({
+      id: agentId,
+      settings: instanceSettings,
+      router,
+      agentRuntime: this.agentRuntime,
+      systemPromptOverride: opts.systemPrompt,
+      permissionModeOverride: opts.permissionMode as PermissionModeLabel | undefined,
+      skills: this.skills,
+      projects: this.projects,
+      role: opts.role as PromptRole | undefined,
+    });
+
+    const remainingBudget = Math.max(0, entry.budgetUsd - entry.spentUsd - entry.spentByChildren);
+    if (remainingBudget <= 0) {
+      return { ok: false, error: `Agent "${agentId}" has no remaining budget ($${entry.budgetUsd} spent).` };
+    }
+
+    const timeoutMs = opts.timeoutMs ?? this.settings.agentTimeoutMs ?? 300_000;
+    const lineage = new Set(entry.lineage);
+
+    const summary: AgentSummary = {
+      id: agentId,
+      parentId: entry.parentId,
+      label: opts.label ?? truncateLabel(opts.task),
+      task: opts.task,
+      status: 'running',
+      model: host.getActiveModel(),
+      cost: { totalTokens: 0, totalCost: entry.spentUsd },
+      createdAt: Date.now(),
+      depth: lineage.size,
+      batchId: opts.batchId,
+    };
+
+    const record: InstanceRecord = {
+      id: agentId,
+      host,
+      summary,
+      lineage,
+      createdAt: Date.now(),
+      parentId: entry.parentId,
+      completionWaiters: [],
+      completed: false,
+      budgetUsd: remainingBudget,
+      spentByChildren: 0,
+      batchId: opts.batchId,
+    };
+    this.instances.set(agentId, record);
+    this.bridge.notifyAgentRegistered(summary);
+    this.bridge.attach(agentId, host);
+    this.notifySummariesChanged();
+
+    record.timeoutHandle = setTimeout(() => {
+      logger.warn(`Resumed agent "${agentId}" timed out after ${timeoutMs}ms`);
+      this.completeInstance(agentId, {
+        status: 'error',
+        error: `Timed out after ${(timeoutMs / 1000).toFixed(0)}s`,
+      });
+    }, timeoutMs);
+
+    record.detach = host.on((e) => this.handleSpawnedEvent(agentId, e));
+
+    try { this.onAgentSpawned?.(agentId, host, entry.parentId); } catch (err) {
+      logger.warn(`onAgentSpawned hook threw for resumed "${agentId}"`, err);
+    }
+
+    try {
+      await host.initialize(session);
+
+      const toolWarning = entry.inFlightTool
+        ? ` The tool call '${entry.inFlightTool}' did not complete — verify current state before proceeding.`
+        : '';
+      const resumePrompt =
+        `Continue working on your task. Your session was restored after a crash.${toolWarning}`;
+
+      host.submit(resumePrompt).catch((err) => {
+        logger.error(`Resumed agent "${agentId}" submit failed`, err);
+        this.completeInstance(agentId, { status: 'error', error: getErrorMessage(err) });
+      });
+
+      logger.info(`Agent "${agentId}" resumed from crash journal`, {
+        task: opts.task.slice(0, 100),
+        remainingBudget,
+      });
+
+      return { ok: true, agentId, host };
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      logger.error(`Agent "${agentId}" failed to resume`, err);
+      this.completeInstance(agentId, { status: 'error', error: msg });
+      return { ok: false, error: msg };
+    }
+  }
+
   // ── Query / list ────────────────────────────────────────────────────
 
   getBridge() { return this.bridge; }
+  getCrashJournal() { return this.crashJournal; }
 
 
   reloadToolTree(agentId: string): boolean {
@@ -668,6 +822,11 @@ export class AgentManager {
       result: result.result?.slice(0, 100),
       error: result.error,
     });
+
+    if (this.crashJournal) {
+      this.crashJournal.markComplete(agentId).catch(err =>
+        logger.warn(`Journal cleanup failed for "${agentId}"`, err));
+    }
 
     // Keep the record around so query/list work after completion.
     // A follow-up could prune old ones after N minutes.

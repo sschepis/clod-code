@@ -12,6 +12,14 @@ export interface SessionStoreOptions {
   workspaceState: vscode.Memento;
 }
 
+export interface CompactionSummaryRecord {
+  timestamp: number;
+  summary: string;
+  formattedSummary: string;
+  removedMessageCount: number;
+  compactionIndex: number;
+}
+
 export interface PanelMeta {
   panelId: string;
   label: string;
@@ -80,11 +88,23 @@ export class SessionStore {
     const mine = await this.tryRead(path.join(this.storageDir, `${this.windowId}.json`));
     if (mine) return mine;
 
-    // 2. Adoption heuristic: the window that most recently saved.
+    // 2. Adoption heuristic: claim-and-rename to prevent two windows from
+    //    adopting the same session. The rename with overwrite:false is the
+    //    serialization point — only one window's rename succeeds.
     const lastId = this.workspaceState.get<string>(LAST_WINDOW_ID_KEY);
     if (lastId && lastId !== this.windowId) {
-      const adopted = await this.tryRead(path.join(this.storageDir, `${lastId}.json`));
-      if (adopted) return adopted;
+      const sourcePath = path.join(this.storageDir, `${lastId}.json`);
+      const destPath = path.join(this.storageDir, `${this.windowId}.json`);
+      const claimed = await this.tryClaim(sourcePath, destPath);
+      if (claimed) {
+        for (const suffix of ['.memory.json', '.routing.json', '.events.json', '.compactions.json']) {
+          await this.tryClaim(
+            path.join(this.storageDir, `${lastId}${suffix}`),
+            path.join(this.storageDir, `${this.windowId}${suffix}`),
+          );
+        }
+        return claimed;
+      }
     }
 
     // 3. One-time legacy migration: the pre-multi-window layout used a fixed
@@ -236,7 +256,7 @@ export class SessionStore {
   }
 
   async deletePanel(panelId: string): Promise<void> {
-    for (const suffix of ['.json', '.memory.json', '.routing.json', '.events.json']) {
+    for (const suffix of ['.json', '.memory.json', '.routing.json', '.events.json', '.compactions.json']) {
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(path.join(this.storageDir, `${panelId}${suffix}`)));
       } catch { /* may not exist */ }
@@ -292,6 +312,58 @@ export class SessionStore {
     return this.tryReadJson(path.join(this.storageDir, `${panelId}.events.json`)) as Promise<unknown[] | undefined>;
   }
 
+  // ── Compaction summary persistence ─────────────────────────────────
+
+  private static readonly MAX_COMPACTION_RECORDS = 20;
+
+  async saveCompactionSummary(record: CompactionSummaryRecord): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${this.windowId}.compactions.json`);
+    let existing = await this.loadCompactionRecords(filePath);
+    existing.push(record);
+    if (existing.length > SessionStore.MAX_COMPACTION_RECORDS) {
+      existing = existing.slice(-SessionStore.MAX_COMPACTION_RECORDS);
+    }
+    await vscode.workspace.fs.writeFile(
+      vscode.Uri.file(filePath),
+      new TextEncoder().encode(JSON.stringify(existing)),
+    );
+  }
+
+  async loadCompactionSummaries(): Promise<CompactionSummaryRecord[]> {
+    const myPath = path.join(this.storageDir, `${this.windowId}.compactions.json`);
+    const mine = await this.loadCompactionRecords(myPath);
+    if (mine.length) return mine;
+    const lastId = this.workspaceState.get<string>(LAST_WINDOW_ID_KEY);
+    if (lastId && lastId !== this.windowId) {
+      return this.loadCompactionRecords(path.join(this.storageDir, `${lastId}.compactions.json`));
+    }
+    return [];
+  }
+
+  async savePanelCompactionSummary(panelId: string, record: CompactionSummaryRecord): Promise<void> {
+    await this.ensureDir();
+    const filePath = path.join(this.storageDir, `${panelId}.compactions.json`);
+    let existing = await this.loadCompactionRecords(filePath);
+    existing.push(record);
+    if (existing.length > SessionStore.MAX_COMPACTION_RECORDS) {
+      existing = existing.slice(-SessionStore.MAX_COMPACTION_RECORDS);
+    }
+    await vscode.workspace.fs.writeFile(
+      vscode.Uri.file(filePath),
+      new TextEncoder().encode(JSON.stringify(existing)),
+    );
+  }
+
+  async loadPanelCompactionSummaries(panelId: string): Promise<CompactionSummaryRecord[]> {
+    return this.loadCompactionRecords(path.join(this.storageDir, `${panelId}.compactions.json`));
+  }
+
+  private async loadCompactionRecords(filePath: string): Promise<CompactionSummaryRecord[]> {
+    const data = await this.tryReadJson(filePath);
+    return Array.isArray(data) ? data as CompactionSummaryRecord[] : [];
+  }
+
   async flush(): Promise<void> {
     const promises: Promise<void>[] = [];
     if (this.pendingSession) {
@@ -315,6 +387,20 @@ export class SessionStore {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     for (const timer of this.panelSaveTimers.values()) clearTimeout(timer);
     this.panelSaveTimers.clear();
+  }
+
+  private async tryClaim(sourcePath: string, destPath: string): Promise<Session | undefined> {
+    try {
+      const data = await vscode.workspace.fs.readFile(vscode.Uri.file(sourcePath));
+      await vscode.workspace.fs.rename(
+        vscode.Uri.file(sourcePath),
+        vscode.Uri.file(destPath),
+        { overwrite: false },
+      );
+      return JSON.parse(new TextDecoder().decode(data)) as Session;
+    } catch {
+      return undefined;
+    }
   }
 
   private async tryRead(filePath: string): Promise<Session | undefined> {

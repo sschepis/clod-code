@@ -32,6 +32,8 @@ import { AgentHost } from './agent-host';
 import { AgentManager } from './agent-manager';
 import { WebviewBridge } from './webview-bridge';
 import { buildToolTree } from './tool-tree';
+import { clearProviderCache } from './providers';
+import { invalidateSystemPromptCache } from './system-prompt';
 import { pushSubconsciousEvent, CodeMap, BrowserSession } from '../tools';
 import { SessionStore } from './session-store';
 import { getUserPromptBridge } from './user-prompt-bridge';
@@ -59,6 +61,7 @@ import type {
 
 import { logger } from '../shared/logger';
 import { MAX_ATTACHMENT_TEXT_LENGTH } from '../shared/constants';
+import { CrashJournalManager, type CrashJournalEntry } from './crash-journal';
 import { SpeechToText } from '../audio/speech-to-text';
 import {
   wrapPlanMode,
@@ -152,12 +155,16 @@ export class Orchestrator {
   public readonly toolbarRegistry: ToolbarRegistry;
   private problemReporter?: import('../tools/problem-reporter').ToolProblemReporter;
   private fleetMesh?: FleetMeshManager;
+  private crashJournal: CrashJournalManager;
 
   public get surfaceManagerInstance(): SurfaceManager {
     return this.surfaceManager;
   }
 
+  private contextCache = new Map<string, boolean>();
   private setContext(key: string, value: boolean): void {
+    if (this.contextCache.get(key) === value) return;
+    this.contextCache.set(key, value);
     vscode.commands.executeCommand('setContext', key, value);
   }
 
@@ -322,6 +329,8 @@ export class Orchestrator {
       },
     );
 
+    this.crashJournal = new CrashJournalManager(sessionStore.getStorageDir());
+
     // AgentManager needs a tool-tree factory. For the foreground we pass an
     // agent-deps object that references `this.manager` — so we initialize
     // the manager first with a placeholder factory and patch it below.
@@ -332,6 +341,7 @@ export class Orchestrator {
       bridge: this.bridge,
       skills: this.skillManager,
       projects: this.projectManager,
+      crashJournal: this.crashJournal,
       onSummariesChanged: () => {
         this.peerManager.notifyLocalAgentsChanged();
         this.scheduleObjectsBroadcast();
@@ -344,8 +354,11 @@ export class Orchestrator {
           this.memoryManager.snapshotForSpawn(parentId ?? FOREGROUND_AGENT_ID, agentId);
         }
         this.attachMemoryAutoCapture(agentId, host);
+        this.attachCompactionHandler(agentId, host);
+        this.attachRagAutoIndex(agentId, host);
         this.syncMonitor?.registerAgent(agentId);
         this.attachSyncCapture(agentId, host);
+        this.attachCrashJournalListeners(agentId, host);
       },
     });
 
@@ -427,6 +440,8 @@ export class Orchestrator {
       await this.sessionStore.saveUiEvents(slice.events);
     } else if (this.manager.isInteractive(agentId)) {
       await this.sessionStore.savePanelUiEvents(agentId, slice.events);
+    } else {
+      await this.crashJournal.saveAgentEvents(agentId, slice.events);
     }
   }
 
@@ -442,6 +457,8 @@ export class Orchestrator {
       await this.sessionStore.save(session);
     } else if (this.manager.isInteractive(agentId)) {
       await this.sessionStore.savePanel(agentId, session);
+    } else {
+      await this.crashJournal.saveAgentSession(agentId, session);
     }
   }
 
@@ -701,6 +718,11 @@ export class Orchestrator {
 
     this.projectManager.ensureProject();
 
+    // Check for background agents interrupted by a prior crash
+    this.crashJournal.findInterruptedAgents().then(interrupted => {
+      if (interrupted.length > 0) this.promptCrashRecovery(interrupted);
+    }).catch(err => logger.warn('Crash recovery scan failed', err));
+
     // Start peer presence last so `listAll()` picks up the foreground agent
     // in the initial hello broadcast.
     try {
@@ -715,6 +737,8 @@ export class Orchestrator {
     if (newSettings) {
       this.settings = newSettings;
       this.manager.updateSettings(newSettings);
+      clearProviderCache();
+      invalidateSystemPromptCache();
     }
     const fgSettings = this.settingsForAgent(FOREGROUND_AGENT_ID);
     await this.manager.recreateForeground(fgSettings);
@@ -897,6 +921,14 @@ export class Orchestrator {
     this.projectManager.dispose();
     this.dispatches.dispose();
     this.peerAsks.dispose();
+
+    // Graceful shutdown: mark all running background agents as complete
+    // so they aren't mistaken for crash victims on next activation.
+    for (const summary of this.manager.list('running')) {
+      this.crashJournal.markComplete(summary.id).catch(() => {});
+    }
+    this.crashJournal.dispose();
+
     void this.manager.dispose();
     void this.sessionStore.flush().finally(() => this.sessionStore.dispose());
     if (this.memoryManager) void this.memoryManager.dispose();
@@ -1071,6 +1103,8 @@ export class Orchestrator {
     });
 
     this.attachMemoryAutoCapture(panelId, host);
+    this.attachCompactionHandler(panelId, host);
+    this.attachRagAutoIndex(panelId, host);
     this.syncMonitor?.registerAgent(panelId);
     this.attachSyncCapture(panelId, host);
   }
@@ -1207,6 +1241,8 @@ export class Orchestrator {
 
     // Auto-capture tool completions into conversation memory
     this.attachMemoryAutoCapture(FOREGROUND_AGENT_ID, host);
+    this.attachCompactionHandler(FOREGROUND_AGENT_ID, host);
+    this.attachRagAutoIndex(FOREGROUND_AGENT_ID, host);
 
     // Register foreground with Kuramoto sync monitor
     this.syncMonitor?.registerAgent(FOREGROUND_AGENT_ID);
@@ -1237,6 +1273,71 @@ export class Orchestrator {
         tags: [rootName],
         strength: 0.2,
       });
+    });
+  }
+
+  attachCompactionHandler(agentId: string, host: AgentHost): void {
+    if (!this.memoryManager) return;
+    const mem = this.memoryManager;
+
+    host.on((event) => {
+      if (event.type !== 'session_compacted') return;
+
+      const conversationField = mem.getConversation(agentId);
+      const candidates = conversationField.all().filter(e => e.strength >= 0.6);
+      let promoted = 0;
+      for (const entry of candidates) {
+        const result = mem.promote(agentId, entry.id, 'project');
+        if (result) promoted++;
+      }
+      if (promoted > 0) {
+        logger.info(`Orchestrator: auto-promoted ${promoted} entries to project scope on compaction (agent=${agentId})`);
+      }
+
+      mem.recordConversationEntry(agentId, {
+        title: 'compaction:summary',
+        body: event.summary,
+        tags: ['compaction', 'context-recovery'],
+        strength: 0.9,
+      });
+
+      this.sessionStore.saveCompactionSummary({
+        timestamp: Date.now(),
+        summary: event.summary,
+        formattedSummary: event.formattedSummary,
+        removedMessageCount: event.removedMessageCount,
+        compactionIndex: host.getCompactionCount(),
+      }).catch(err => {
+        logger.warn(`Compaction summary save failed for ${agentId}`, err);
+      });
+
+      if (this.settings.conversationRagEnabled) {
+        const rag = host.getConversationRAG();
+        const session = host.getSession();
+        if (rag && session) {
+          rag.indexSession(session).catch((err: unknown) => {
+            logger.warn(`ConversationRAG re-index failed for ${agentId}`, err);
+          });
+        }
+      }
+    });
+  }
+
+  private attachRagAutoIndex(agentId: string, host: AgentHost): void {
+    if (!this.settings.conversationRagEnabled) return;
+
+    host.on((event) => {
+      if (event.type !== 'tool_complete') return;
+      if (event.error) return;
+      const result = event.result ?? '';
+      if (!result.trim()) return;
+
+      const rag = host.getConversationRAG();
+      if (rag) {
+        rag.indexToolResult(event.command, {}, result).catch((err: unknown) => {
+          logger.debug(`ConversationRAG tool indexing failed for ${agentId}`, err);
+        });
+      }
     });
   }
 
@@ -1272,8 +1373,188 @@ export class Orchestrator {
     });
   }
 
+  private attachCrashJournalListeners(agentId: string, host: AgentHost): void {
+    let sessionSaveTimer: ReturnType<typeof setTimeout> | undefined;
+    const debouncedSessionSave = () => {
+      if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+      sessionSaveTimer = setTimeout(() => {
+        sessionSaveTimer = undefined;
+        const s = host.getSession();
+        if (s) {
+          this.crashJournal.saveAgentSession(agentId, s).catch(err =>
+            logger.warn(`Crash journal session save failed for ${agentId}`, err));
+        }
+      }, 500);
+    };
+
+    host.on((event) => {
+      if (event.type === 'tool_start') {
+        this.crashJournal.updateInFlightTool(agentId, event.command).catch(err =>
+          logger.warn(`Crash journal tool_start update failed for ${agentId}`, err));
+      }
+      if (event.type === 'tool_complete') {
+        this.crashJournal.updateInFlightTool(agentId, null).catch(err =>
+          logger.warn(`Crash journal tool_complete update failed for ${agentId}`, err));
+        debouncedSessionSave();
+      }
+      if (event.type === 'turn_complete') {
+        if (sessionSaveTimer) { clearTimeout(sessionSaveTimer); sessionSaveTimer = undefined; }
+        const s = host.getSession();
+        if (s) {
+          this.crashJournal.saveAgentSession(agentId, s).catch(err =>
+            logger.warn(`Crash journal turn_complete save failed for ${agentId}`, err));
+        }
+        const slice = this.bridge.getSlice(agentId);
+        if (slice) {
+          this.crashJournal.saveAgentEvents(agentId, slice.events).catch(err =>
+            logger.warn(`Crash journal events save failed for ${agentId}`, err));
+        }
+      }
+      if (event.type === 'cost') {
+        this.crashJournal.updateSpent(agentId, event.totalCost, 0).catch(() => {});
+      }
+      if (event.type === 'disposed') {
+        if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+      }
+    });
+  }
+
   /** Expose the MemoryManager so AgentManager can snapshot on spawn. */
   getMemoryManager(): MemoryManager | undefined { return this.memoryManager; }
+
+  // ── Crash recovery ──────────────────────────────────────────────────
+
+  private async promptCrashRecovery(entries: CrashJournalEntry[]): Promise<void> {
+    const count = entries.length;
+    const labels = entries
+      .slice(0, 3)
+      .map(e => e.spawnOpts.label || e.spawnOpts.task.slice(0, 40))
+      .join(', ');
+    const suffix = count > 3 ? ` and ${count - 3} more` : '';
+
+    const choice = await vscode.window.showWarningMessage(
+      `${count} background agent(s) were interrupted by a crash: ${labels}${suffix}`,
+      'Resume All',
+      'Choose...',
+      'Discard All',
+    );
+
+    if (choice === 'Resume All') {
+      await this.resumeInterruptedAgents(entries);
+    } else if (choice === 'Choose...') {
+      await this.showRecoveryQuickPick(entries);
+    } else {
+      await this.crashJournal.clearAll();
+    }
+  }
+
+  private async showRecoveryQuickPick(entries: CrashJournalEntry[]): Promise<void> {
+    const items = entries.map(e => ({
+      label: e.spawnOpts.label || e.spawnOpts.task.slice(0, 60),
+      description: e.inFlightTool ? `(interrupted during ${e.inFlightTool})` : '',
+      detail: e.spawnOpts.task.slice(0, 120),
+      entry: e,
+      picked: true,
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+      canPickMany: true,
+      placeHolder: 'Select agents to resume (unselected will be discarded)',
+    });
+
+    if (!selected) {
+      await this.crashJournal.clearAll();
+      return;
+    }
+
+    const toResume = new Set(selected.map(s => s.entry.agentId));
+    for (const entry of entries) {
+      if (!toResume.has(entry.agentId)) {
+        await this.crashJournal.removeJournal(entry.agentId);
+      }
+    }
+    await this.resumeInterruptedAgents(selected.map(s => s.entry));
+  }
+
+  private async resumeInterruptedAgents(entries: CrashJournalEntry[]): Promise<void> {
+    for (const entry of entries) {
+      try {
+        const session = await this.crashJournal.loadAgentSession(entry.agentId);
+        const events = await this.crashJournal.loadAgentEvents(entry.agentId);
+
+        if (!session) {
+          logger.warn(`No session found for interrupted agent ${entry.agentId}, skipping`);
+          await this.crashJournal.removeJournal(entry.agentId);
+          continue;
+        }
+
+        const repairedSession = this.repairTornSession(session, entry);
+        const result = await this.manager.resumeAgent(entry, repairedSession);
+
+        if (result.ok) {
+          if (events && events.length > 0) {
+            const slice = this.bridge.getSlice(result.agentId);
+            if (slice) slice.events = events as any;
+          }
+          logger.info(`Resumed interrupted agent ${entry.agentId}`);
+        } else {
+          logger.warn(`Failed to resume agent ${entry.agentId}: ${result.error}`);
+        }
+      } catch (err) {
+        logger.error(`Error resuming agent ${entry.agentId}`, err);
+      }
+      await this.crashJournal.removeJournal(entry.agentId);
+    }
+  }
+
+  private repairTornSession(session: Session, entry: CrashJournalEntry): Session {
+    if (!entry.inFlightTool) return session;
+
+    const messages = [...session.messages];
+    if (messages.length === 0) return session;
+
+    const last = messages[messages.length - 1];
+
+    // Assistant message at the end with tool_use blocks that were never
+    // executed — remove so the LLM will re-plan on resume.
+    if (last.role === 2 /* Assistant */) {
+      const hasToolUse = last.blocks.some(
+        (b: any) => b.kind === 'tool_use',
+      );
+      if (hasToolUse) {
+        messages.pop();
+      }
+    }
+
+    // If the last message is a tool result (role=3), check completeness:
+    // there should be a preceding assistant message with matching tool_use
+    // blocks. If tool results are partial, remove both.
+    if (messages.length > 0) {
+      const newLast = messages[messages.length - 1];
+      if (newLast.role === 3 /* Tool */ && messages.length >= 2) {
+        const preceding = messages[messages.length - 2];
+        if (preceding.role === 2 /* Assistant */) {
+          const toolUseIds = new Set(
+            preceding.blocks
+              .filter((b: any) => b.kind === 'tool_use')
+              .map((b: any) => b.id),
+          );
+          const toolResultIds = new Set(
+            newLast.blocks
+              .filter((b: any) => b.kind === 'tool_result')
+              .map((b: any) => b.toolUseId),
+          );
+          const allAnswered = [...toolUseIds].every(id => toolResultIds.has(id));
+          if (!allAnswered) {
+            messages.pop();
+            messages.pop();
+          }
+        }
+      }
+    }
+
+    return { version: session.version, messages };
+  }
 
   // ── Tool tree factory ───────────────────────────────────────────────
 
@@ -1431,7 +1712,14 @@ export class Orchestrator {
           this.sendInterAgentMessage(callerId, targetId, message, awaitResponse),
       },
       memory: this.memoryManager
-        ? { manager: this.memoryManager, callerId: () => agentId }
+        ? {
+            manager: this.memoryManager,
+            callerId: () => agentId,
+            isHumanSupervised: () => agentId === FOREGROUND_AGENT_ID || this.manager.isInteractive(agentId),
+          }
+        : undefined,
+      rag: this.settings.conversationRagEnabled
+        ? { getRag: () => this.manager.get(agentId)?.host?.getConversationRAG() }
         : undefined,
       chatTitle,
       shell: { getShell: () => this.settings.shell },
